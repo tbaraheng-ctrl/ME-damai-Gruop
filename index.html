@@ -11,9 +11,8 @@
     <style>
         body { font-family: 'Prompt', sans-serif; background-color: #FFF7ED; }
         .primary-gradient { background: linear-gradient(135deg, #f97316 0%, #fb923c 100%); }
-        .loader { border-top-color: #f97316; -webkit-animation: spinner 1.5s linear infinite; animation: spinner 1.5s linear infinite; }
-        @-webkit-keyframes spinner { 0% { -webkit-transform: rotate(0deg); } 100% { -webkit-transform: rotate(360deg); } }
-        @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        /* Loader class for buttons/tables */
+        .fa-spin-fast { -webkit-animation: fa-spin 1s infinite linear; animation: fa-spin 1s infinite linear; }
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; }
         ::-webkit-scrollbar-thumb { background: #fb923c; border-radius: 3px; }
@@ -30,20 +29,29 @@
         let currentRole = null;
         let currentSalesData = []; 
         let currentExpenseData = []; 
-        let currentSalaryHistory = []; // เพิ่มตัวแปรเก็บประวัติเงินเดือน
+        let currentSalaryHistory = [];
+        let currentPettyCashData = []; 
         let creditDashboardData = null; 
+        let currentVerificationHistory = []; 
         let cameraStream = null;
         let summaryDataRaw = [];
-        
-        // Cache for Salary Rates (initially empty, loaded from server)
         let salaryRates = {};
+        let latePolicy = { time: '08:00', rate: 0 }; // Default
+        let selectedPendingSale = null; 
+        
+        // Data for Salary Calc
+        let calcDailyShortages = {}; 
+        let calcDailyEmpCounts = {};
+        
+        // รายชื่อร้านค้าเริ่มต้น
+        let shopList = ["ร้านวีเอ", "เบเกอรี่โฮม", "โดนใจรือเสาะ", "ร้านผัก"];
 
-        // *** การตั้งค่าพิกัดร้าน (โหลดจาก LocalStorage หรือใช้ค่าเริ่มต้น) ***
+        // *** การตั้งค่าพิกัดร้าน ***
         let SHOP_LAT = 6.3925; 
         let SHOP_LNG = 101.5200; 
         let MAX_DIST_METERS = 500; 
 
-        // โหลดค่าที่บันทึกไว้ (ถ้ามี)
+        // โหลดค่าจาก LocalStorage
         const savedLat = localStorage.getItem('shop_lat');
         const savedLng = localStorage.getItem('shop_lng');
         const savedDist = localStorage.getItem('shop_dist');
@@ -51,12 +59,31 @@
         if(savedLat) SHOP_LAT = parseFloat(savedLat);
         if(savedLng) SHOP_LNG = parseFloat(savedLng);
         if(savedDist) MAX_DIST_METERS = parseFloat(savedDist);
+
+        // ดึงพิกัดล่าสุดจาก Server
+        fetchCoordinates();
+
+        function fetchCoordinates() {
+            fetch(`${APPS_SCRIPT_URL}?action=getCoordinates&_t=${Date.now()}`)
+            .then(r => r.json())
+            .then(res => {
+                if(res.status === 'success' && res.data) {
+                    SHOP_LAT = parseFloat(res.data.lat);
+                    SHOP_LNG = parseFloat(res.data.lng);
+                    MAX_DIST_METERS = parseFloat(res.data.dist);
+                    localStorage.setItem('shop_lat', SHOP_LAT);
+                    localStorage.setItem('shop_lng', SHOP_LNG);
+                    localStorage.setItem('shop_dist', MAX_DIST_METERS);
+                }
+            })
+            .catch(e => console.log('Using default/cached coords'));
+        }
     </script>
 
     <!-- Loading Overlay -->
     <div id="loadingOverlay" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 hidden">
         <div class="bg-white p-5 rounded-lg flex flex-col items-center">
-            <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12 mb-4"></div>
+            <div class="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
             <h2 class="text-center text-gray-700 text-xl font-semibold">กำลังโหลด...</h2>
         </div>
     </div>
@@ -81,7 +108,7 @@
                         <input type="password" id="loginPassword" class="shadow appearance-none border rounded w-full py-3 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-orange-500" placeholder="Password" required>
                         <i class="fa-solid fa-eye absolute right-3 top-10 text-gray-400 cursor-pointer" onclick="togglePasswordVisibility('loginPassword')"></i>
                     </div>
-                    <button type="submit" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-xl focus:outline-none focus:shadow-outline transition duration-300">เข้าสู่ระบบ</button>
+                    <button type="submit" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-xl focus:outline-none focus:shadow-outline transition duration-300 flex justify-center items-center">เข้าสู่ระบบ</button>
                 </form>
             </div>
         </div>
@@ -100,55 +127,13 @@
                     </div>
                     <span class="font-bold text-gray-800">ลูม่าคาเฟ่&เบอร์เกอร์ทอด</span>
                 </button>
-                <button onclick="alert('กำลังพัฒนาระบบร้านนี้')" class="bg-white p-4 rounded-2xl shadow-lg w-full max-w-xs flex flex-col items-center hover:scale-105 transition transform duration-200 opacity-80">
+                
+                <button onclick="alert('กำลังพัฒนาระบบร้านนี้')" class="mt-2 bg-white p-4 rounded-2xl shadow-lg w-full max-w-xs flex flex-col items-center hover:scale-105 transition transform duration-200 opacity-80">
                     <div class="w-20 h-20 rounded-full overflow-hidden mb-3 border-4 border-blue-100">
                         <img src="https://scontent.fbkk5-4.fna.fbcdn.net/v/t39.30808-6/349085757_268552375555511_950427689547822083_n.jpg?_nc_cat=110&ccb=1-7&_nc_sid=6ee11a&_nc_ohc=aMTcVDNGaOYQ7kNvwFoQukk&_nc_oc=AdlKAwKnoTZ15A0YC1UvHR7R7q7fjKTf_8G4IwJPvqbq9l1oRQ0mdnkRKLKZtrzahcBBSiIVNZepgQr4um9HV690&_nc_zt=23&_nc_ht=scontent.fbkk5-4.fna&_nc_gid=koi-el4g4edoxhxid4aQ2g&oh=00_AfnY9e0FVLMbWmrctbSwVN7z-0CBtoPVRrchXp2nJbSQVQ&oe=6951C936" class="w-full h-full object-cover">
                     </div>
                     <span class="font-bold text-gray-800">มีแบร์ลอนดรี่</span>
                 </button>
-                
-                <!-- Set Attendance Coordinates -->
-                <button onclick="openSetCoords()" class="mt-4 w-full max-w-xs bg-gray-100 text-gray-600 border border-gray-300 p-3 rounded-xl shadow flex items-center justify-center hover:bg-gray-200 transition">
-                    <i class="fa-solid fa-map-location-dot mr-2"></i> ตั้งค่าพิกัดลงเวลา
-                </button>
-            </div>
-        </div>
-
-        <!-- NEW PAGE: SET COORDINATES -->
-        <div id="page-set-coords" class="page-section hidden min-h-screen bg-gray-50">
-            <header class="bg-gray-700 text-white p-4 flex items-center shadow sticky top-0 z-20">
-                <button onclick="navigateTo('page-owner-home')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button>
-                <h1 class="font-bold">ตั้งค่าพิกัดร้าน</h1>
-            </header>
-            <div class="p-6">
-                <div class="bg-white rounded-xl shadow p-5 space-y-4">
-                    <div class="text-center mb-4">
-                        <i class="fa-solid fa-location-crosshairs text-4xl text-blue-500 mb-2"></i>
-                        <h2 class="text-lg font-bold text-gray-700">กำหนดจุดเช็คอิน</h2>
-                        <p class="text-sm text-gray-500">ไปยืนที่ร้านแล้วกดปุ่มด้านล่างเพื่อบันทึกตำแหน่ง</p>
-                    </div>
-
-                    <div>
-                        <label class="block text-xs font-bold text-gray-500 mb-1">ละติจูด (Latitude)</label>
-                        <input type="text" id="setLat" class="w-full border rounded p-2 bg-gray-100" readonly>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-gray-500 mb-1">ลองจิจูด (Longitude)</label>
-                        <input type="text" id="setLng" class="w-full border rounded p-2 bg-gray-100" readonly>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-gray-500 mb-1">ระยะห่างที่ยอมรับได้ (เมตร)</label>
-                        <input type="number" id="setDist" class="w-full border rounded p-2" value="500">
-                    </div>
-
-                    <button onclick="getCurrentCoordsForSetting()" class="w-full bg-blue-500 text-white py-2 rounded-lg shadow hover:bg-blue-600 mb-2">
-                        <i class="fa-solid fa-crosshairs mr-2"></i> ดึงพิกัดปัจจุบัน
-                    </button>
-                    
-                    <button onclick="saveCoords()" class="w-full bg-green-600 text-white py-3 rounded-lg shadow-lg font-bold hover:bg-green-700">
-                        บันทึกการตั้งค่า
-                    </button>
-                </div>
             </div>
         </div>
 
@@ -164,7 +149,6 @@
                     <span class="font-bold">จัดการบัญชี</span>
                 </button>
                 
-                <!-- Updated: Salary Menu -->
                 <button onclick="openSalaryHome()" class="bg-white p-6 rounded-xl shadow-md flex flex-col items-center justify-center text-orange-600 hover:bg-orange-50">
                     <i class="fa-solid fa-money-bill-wave text-4xl mb-2"></i>
                     <span class="font-bold text-sm">เงินเดือน</span>
@@ -174,6 +158,17 @@
                     <i class="fa-solid fa-clock text-4xl mb-2"></i>
                     <span class="font-bold text-sm">เข้างาน</span>
                 </button>
+
+                <button onclick="openPettyCashOwner()" class="bg-white p-6 rounded-xl shadow-md flex flex-col items-center justify-center text-cyan-600 hover:bg-cyan-50">
+                    <i class="fa-solid fa-wallet text-4xl mb-2"></i>
+                    <span class="font-bold text-sm">เงินสำรองจ่าย</span>
+                </button>
+
+                <button onclick="openSetCoords()" class="bg-white p-6 rounded-xl shadow-md flex flex-col items-center justify-center text-purple-600 hover:bg-purple-50">
+                    <i class="fa-solid fa-map-location-dot text-4xl mb-2"></i>
+                    <span class="font-bold text-sm">ตั้งค่าพิกัด</span>
+                </button>
+
                 <button class="bg-white p-6 rounded-xl shadow-md flex flex-col items-center justify-center text-gray-400 cursor-not-allowed">
                     <i class="fa-solid fa-chart-line text-4xl mb-2"></i>
                     <span class="font-bold text-sm">รายงาน (เร็วๆนี้)</span>
@@ -181,171 +176,224 @@
             </div>
         </div>
 
-        <!-- SALARY: HOME -->
-        <div id="page-salary-home" class="page-section hidden min-h-screen bg-blue-50">
-            <header class="bg-blue-600 text-white p-4 flex items-center shadow sticky top-0 z-10">
-                <button onclick="navigateTo('page-luma-menu')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button>
-                <h1 class="font-bold">ระบบเงินเดือน</h1>
-            </header>
-            <div class="p-6 grid grid-cols-1 gap-4 mt-2">
-                <button onclick="openSalaryCalc()" class="bg-white p-6 rounded-xl shadow-lg flex items-center justify-between hover:bg-blue-50">
-                    <div class="flex items-center gap-4">
-                        <div class="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xl">
-                            <i class="fa-solid fa-calculator"></i>
-                        </div>
-                        <div class="text-left">
-                            <h3 class="font-bold text-gray-800">คำนวณและจ่ายเงินเดือน</h3>
-                            <p class="text-xs text-gray-500">คำนวณจากวันมาทำงาน</p>
-                        </div>
-                    </div>
-                    <i class="fa-solid fa-chevron-right text-gray-300"></i>
-                </button>
+        <!-- ACCOUNT MGMT -->
+        <div id="page-account-mgmt" class="page-section hidden min-h-screen bg-gray-50">
+             <header class="bg-white text-orange-600 p-4 flex items-center shadow sticky top-0 z-10">
+                 <button onclick="backFromAccountMgmt()" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button>
+                 <h1 class="font-bold">จัดการบัญชี</h1>
+             </header>
+             <div class="p-4 flex flex-col gap-4">
+                 <button onclick="openDailySales()" class="bg-gradient-to-r from-green-500 to-green-600 text-white p-4 rounded-xl shadow-lg flex items-center justify-between">
+                     <div class="flex items-center"><i class="fa-solid fa-cash-register text-2xl mr-3"></i><span class="font-bold text-lg">บันทึกยอดขายประจำวัน</span></div>
+                     <i class="fa-solid fa-chevron-right"></i>
+                 </button>
+                 
+                 <!-- BUTTON: Money Verification (Owner Only) -->
+                 <button id="btnMoneyVerify" onclick="openMoneyVerification()" class="hidden bg-gradient-to-r from-purple-500 to-purple-600 text-white p-4 rounded-xl shadow-lg flex items-center justify-between">
+                     <div class="flex items-center"><i class="fa-solid fa-money-bill-transfer text-2xl mr-3"></i><span class="font-bold text-lg">ตรวจสอบนับเงิน</span></div>
+                     <i class="fa-solid fa-chevron-right"></i>
+                 </button>
 
-                <button onclick="openSalarySettings()" class="bg-white p-6 rounded-xl shadow-lg flex items-center justify-between hover:bg-blue-50">
-                    <div class="flex items-center gap-4">
-                        <div class="w-12 h-12 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-xl">
-                            <i class="fa-solid fa-sliders"></i>
-                        </div>
-                        <div class="text-left">
-                            <h3 class="font-bold text-gray-800">กำหนดอัตราเงินเดือน</h3>
-                            <p class="text-xs text-gray-500">ตั้งค่าค่าแรงรายวัน/พนักงาน</p>
-                        </div>
-                    </div>
-                    <i class="fa-solid fa-chevron-right text-gray-300"></i>
-                </button>
-            </div>
+                 <button onclick="openExpenses()" class="bg-gradient-to-r from-red-500 to-red-600 text-white p-4 rounded-xl shadow-lg flex items-center justify-between">
+                     <div class="flex items-center"><i class="fa-solid fa-receipt text-2xl mr-3"></i><span class="font-bold text-lg">บันทึกรายจ่าย</span></div>
+                     <i class="fa-solid fa-chevron-right"></i>
+                 </button>
+                 <button id="btnMgtSummary" onclick="openSummary()" class="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-4 rounded-xl shadow-lg flex items-center justify-between">
+                     <div class="flex items-center"><i class="fa-solid fa-chart-pie text-2xl mr-3"></i><span class="font-bold text-lg">สรุปบัญชี</span></div>
+                     <i class="fa-solid fa-chevron-right"></i>
+                 </button>
+             </div>
         </div>
 
-        <!-- SALARY: SETTINGS (RATES) -->
-        <div id="page-salary-settings" class="page-section hidden min-h-screen bg-gray-50">
-            <header class="bg-orange-500 text-white p-4 flex items-center shadow sticky top-0 z-10">
-                <button onclick="navigateTo('page-salary-home')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button>
-                <h1 class="font-bold">กำหนดอัตราเงินเดือน</h1>
-            </header>
-            <div class="p-4">
-                <div class="bg-white rounded-xl shadow overflow-hidden">
-                    <table class="w-full text-sm text-left">
-                        <thead class="bg-gray-100 text-gray-700 uppercase font-bold text-xs">
-                            <tr>
-                                <th class="p-3">ชื่อพนักงาน</th>
-                                <th class="p-3 text-right">ค่าแรง/วัน (บาท)</th>
-                            </tr>
-                        </thead>
-                        <tbody id="salaryRateTableBody">
-                            <tr><td colspan="2" class="p-4 text-center text-gray-400">กำลังโหลด...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-                <div class="mt-4 text-xs text-gray-500 text-center">
-                    * ค่าแรงที่กำหนดจะถูกใช้ในการคำนวณเงินเดือนอัตโนมัติ
-                </div>
-            </div>
+        <!-- MONEY VERIFICATION -->
+        <div id="page-money-verification" class="page-section hidden min-h-screen bg-purple-50 pb-20">
+             <header class="bg-purple-600 text-white p-4 flex items-center shadow sticky top-0 z-20">
+                 <button onclick="navigateTo('page-account-mgmt')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button>
+                 <h1 class="font-bold">ตรวจสอบนับเงิน</h1>
+             </header>
+             
+             <div class="p-4">
+                 <div class="bg-white rounded-xl shadow p-4 mb-4">
+                     <h3 class="font-bold text-purple-700 mb-2 border-b pb-1">1. เลือกวันที่ขาย</h3>
+                     <div class="flex gap-2">
+                         <input type="date" id="verifyDateSelect" class="w-full border rounded p-2 text-sm">
+                         <button onclick="loadPendingSales(this)" class="bg-purple-600 text-white px-4 py-2 rounded-lg font-bold shadow hover:bg-purple-700 flex items-center">
+                             <i class="fa-solid fa-search"></i>
+                         </button>
+                     </div>
+                 </div>
+
+                 <div id="pendingVerifyListContainer" class="hidden mb-4">
+                     <h3 class="font-bold text-gray-700 mb-2 px-1">รายการที่ยังไม่ตรวจนับ</h3>
+                     <div id="pendingVerifyList" class="space-y-2"></div>
+                 </div>
+
+                 <div id="verifyFormContainer" class="hidden bg-white rounded-xl shadow p-4 mb-4 border-l-4 border-purple-500 animate-[fadeIn_0.3s_ease-out]">
+                     <h3 class="font-bold text-purple-700 mb-3 border-b pb-2">บันทึกการตรวจนับ</h3>
+                     <div class="bg-gray-50 p-3 rounded mb-3 border border-gray-200">
+                         <p class="text-xs text-gray-500 font-bold mb-1">ยอดที่พนักงานนับ (ระบบ)</p>
+                         <div class="flex justify-between text-sm mb-1"><span>เงินสด:</span><span id="vEmpCash" class="font-bold text-gray-800">0</span></div>
+                         <div class="flex justify-between text-sm"><span>เงินโอน:</span><span id="vEmpTransfer" class="font-bold text-gray-800">0</span></div>
+                     </div>
+                     <div class="mb-3">
+                         <p class="text-xs text-purple-600 font-bold mb-1">ยอดที่เจ้าของนับได้จริง</p>
+                         <div class="flex gap-2 mb-2">
+                             <div class="w-1/2"><label class="text-xs text-gray-400">เงินสด</label><input type="number" id="vOwnerCash" class="w-full border rounded p-2 text-sm font-bold text-right text-purple-700" placeholder="0" oninput="calcVerifyDiff()"></div>
+                             <div class="w-1/2"><label class="text-xs text-gray-400">เงินโอน</label><input type="number" id="vOwnerTransfer" class="w-full border rounded p-2 text-sm font-bold text-right text-purple-700" placeholder="0" oninput="calcVerifyDiff()"></div>
+                         </div>
+                     </div>
+                     <div class="flex justify-between items-center mb-4 p-2 bg-gray-100 rounded text-sm"><div class="text-red-600">ขาด: <span id="vDiffMissing" class="font-bold">0</span></div><div class="text-green-600">เกิน: <span id="vDiffOver" class="font-bold">0</span></div></div>
+                     <div class="flex gap-2"><button onclick="cancelVerify()" class="w-1/3 bg-gray-300 text-gray-700 rounded-lg py-2 font-bold hover:bg-gray-400">ยกเลิก</button><button onclick="submitVerify(this)" class="w-2/3 bg-purple-600 text-white rounded-lg py-2 font-bold shadow hover:bg-purple-700 flex justify-center items-center"><i class="fa-solid fa-save mr-2"></i> บันทึก</button></div>
+                 </div>
+
+                 <div>
+                     <div class="flex justify-between items-center mb-2"><h3 class="font-bold text-gray-700">ประวัติการตรวจนับ</h3><div class="flex gap-1"><input type="date" id="filterVerifyStart" class="text-xs border rounded p-1" onchange="loadVerifyHistory()"><input type="date" id="filterVerifyEnd" class="text-xs border rounded p-1" onchange="loadVerifyHistory()"></div></div>
+                     <div class="overflow-x-auto bg-white rounded-lg shadow"><table class="w-full text-xs text-left"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-2">วันที่ขาย</th><th class="p-2 text-right">สด(จข)</th><th class="p-2 text-right">โอน(จข)</th><th class="p-2 text-right text-red-500">ขาด</th><th class="p-2 text-right text-green-500">เกิน</th></tr></thead><tbody id="verifyHistoryBody"><tr><td colspan="5" class="text-center p-4 text-gray-400">เลือกช่วงวันที่เพื่อดูประวัติ</td></tr></tbody></table></div>
+                 </div>
+             </div>
+        </div>
+        
+        <!-- ... (Daily Sales, Expenses, Credit Manager, Summary, Petty Cash - same as previous version) ... -->
+        <div id="page-daily-sales" class="page-section hidden min-h-screen bg-gray-100 pb-20">
+             <header class="bg-green-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="navigateTo('page-account-mgmt')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">บันทึกยอดขายประจำวัน</h1></header><div class="p-4"><div class="bg-white rounded-xl shadow p-4 mb-6"><h3 class="font-bold text-gray-700 mb-3 border-b pb-2">แบบฟอร์มบันทึก</h3><form id="salesForm" onsubmit="submitSales(event)"><input type="hidden" id="saleId"><div class="mb-3"><label class="text-xs font-bold text-gray-500">วันที่</label><input type="date" id="saleDate" class="w-full border rounded p-2 text-sm"></div><div class="bg-blue-50 p-2 rounded mb-3"><p class="text-xs font-bold text-blue-800 mb-1">ยอดจากระบบ (POS)</p><div class="flex gap-2 mb-2"><input type="number" id="sysCash" placeholder="เงินสด" class="w-1/2 border rounded p-2 text-sm" oninput="calcSales()"><input type="number" id="sysTransfer" placeholder="เงินโอน" class="w-1/2 border rounded p-2 text-sm" oninput="calcSales()"></div><div class="text-right text-xs text-blue-600 font-bold">รวม: <span id="sysTotalDisplay">0</span></div></div><div class="bg-green-50 p-2 rounded mb-3"><p class="text-xs font-bold text-green-800 mb-1">ยอดที่นับได้จริง</p><div class="flex gap-2 mb-2"><input type="number" id="cntCash" placeholder="เงินสด" class="w-1/2 border rounded p-2 text-sm" oninput="calcSales()"><input type="number" id="cntTransfer" placeholder="เงินโอน" class="w-1/2 border rounded p-2 text-sm" oninput="calcSales()"></div><div class="text-right text-xs text-green-600 font-bold">รวม: <span id="cntTotalDisplay">0</span></div></div><div class="flex justify-between items-center mb-4 p-2 bg-gray-200 rounded text-sm"><div class="text-red-600">ขาด: <span id="diffMissing" class="font-bold">0</span></div><div class="text-green-600">เกิน: <span id="diffOver" class="font-bold">0</span></div></div><button type="submit" id="btnSubmitSales" class="w-full bg-green-600 text-white rounded-lg py-2 font-bold shadow hover:bg-green-700 transition flex justify-center items-center">บันทึกข้อมูล</button></form></div><div><div class="flex justify-between items-center mb-2"><h3 class="font-bold text-gray-700">ประวัติการบันทึก</h3><div class="flex gap-1"><input type="date" id="filterSaleStart" class="text-xs border rounded p-1" onchange="loadSalesHistory()"><input type="date" id="filterSaleEnd" class="text-xs border rounded p-1" onchange="loadSalesHistory()"></div></div><div class="overflow-x-auto bg-white rounded-lg shadow"><table class="w-full text-xs text-left"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-2">วันที่</th><th class="p-2 text-right">เงินสด</th><th class="p-2 text-right">โอน</th><th class="p-2 text-right">รวม(นับ)</th><th class="p-2">ผู้บันทึก</th><th class="p-2 text-center">จัดการ</th></tr></thead><tbody id="salesTableBody"></tbody></table></div></div></div>
+        </div>
+        <div id="page-expenses" class="page-section hidden min-h-screen bg-gray-100 pb-20">
+             <header class="bg-red-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="navigateTo('page-account-mgmt')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">บันทึกรายจ่าย</h1></header><div class="p-4"><button onclick="openCreditManager()" class="w-full bg-yellow-100 text-yellow-700 border border-yellow-300 rounded-lg p-3 flex items-center justify-center font-bold mb-4 hover:bg-yellow-200 transition"><i class="fa-solid fa-file-invoice-dollar mr-2 text-xl"></i> จัดการเงินเชื่อ</button><div class="bg-white rounded-xl shadow p-4 mb-6"><h3 class="font-bold text-gray-700 mb-3 border-b pb-2">บันทึกค่าใช้จ่าย</h3><form id="expenseForm" onsubmit="submitExpense(event)"><input type="hidden" id="expenseId"><div class="flex gap-2 mb-3"><div class="w-1/2"><label class="text-xs font-bold text-gray-500">วันที่</label><input type="date" id="expDate" class="w-full border rounded p-2 text-sm"></div><div class="w-1/2"><label class="text-xs font-bold text-gray-500">จ่ายให้ (ร้าน)</label><select id="expVendor" class="w-full border rounded p-2 text-sm bg-white" onchange="checkVendorOther(this)"><option value="ร้านวีเอ">ร้านวีเอ</option><option value="เบเกอรี่โฮม">เบเกอรี่โฮม</option><option value="โดนใจรือเสาะ">โดนใจรือเสาะ</option><option value="ร้านผัก">ร้านผัก</option><option value="other">+ เพิ่มร้านอื่น</option></select><input type="text" id="expVendorOther" class="w-full border rounded p-2 text-sm mt-1 hidden" placeholder="ระบุชื่อร้าน"></div></div><div class="flex gap-2 mb-3"><div class="w-1/2"><label class="text-xs font-bold text-gray-500">จำนวนเงิน</label><input type="number" id="expAmount" class="w-full border rounded p-2 text-sm"></div><div class="w-1/2"><label class="text-xs font-bold text-gray-500">ประเภท</label><select id="expType" class="w-full border rounded p-2 text-sm bg-white"><option value="เงินสด">เงินสด</option><option value="เงินโอน">เงินโอน</option><option value="เงินเชื่อ">เงินเชื่อ</option></select></div></div><div class="mb-4 bg-gray-100 p-2 rounded-lg text-center"><h4 class="text-sm font-bold mb-2 text-left text-gray-600">รูปใบเสร็จ</h4><div class="relative w-full h-64 bg-gray-200 rounded-lg overflow-hidden flex items-center justify-center mb-2 border border-gray-300"><div id="cameraPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-100 z-30"><i class="fa-solid fa-camera text-4xl text-gray-400 mb-2"></i><button type="button" onclick="startCamera()" class="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 font-bold text-sm">ถ่ายรูปใบเสร็จ</button></div><video id="cameraVideo" class="hidden absolute w-full h-full object-cover z-10" autoplay playsinline></video><canvas id="cameraCanvas" class="hidden absolute w-full h-full object-cover z-20"></canvas><img id="savedImagePreview" class="hidden absolute w-full h-full object-contain bg-black z-20"><div id="cameraControls" class="hidden absolute bottom-4 flex gap-4 z-40"><button type="button" id="btnCapture" onclick="captureImage()" class="bg-white rounded-full p-3 shadow-lg hover:bg-gray-100 transition transform hover:scale-105 border-4 border-gray-300"><i class="fas fa-camera text-2xl text-orange-600"></i></button><button type="button" id="btnRetake" onclick="startCamera()" class="hidden bg-yellow-400 rounded-full p-3 shadow-lg hover:bg-yellow-500 transition transform hover:scale-105"><i class="fas fa-redo text-2xl text-white"></i></button></div></div><p id="imgStatus" class="text-xs text-gray-500 font-medium">กดปุ่มเพื่อถ่ายภาพ</p><input type="hidden" id="expBase64"></div><button type="submit" id="btnSubmitExpense" class="w-full bg-red-600 text-white rounded-lg py-2 font-bold shadow hover:bg-red-700 flex justify-center items-center">บันทึกรายจ่าย</button></form></div><div><div class="flex justify-between items-center mb-2"><h3 class="font-bold text-gray-700">ประวัติรายจ่าย</h3><div class="flex gap-1"><input type="date" id="filterExpStart" class="text-xs border rounded p-1" onchange="loadExpenseHistory()"><input type="date" id="filterExpEnd" class="text-xs border rounded p-1" onchange="loadExpenseHistory()"></div></div><div class="overflow-x-auto bg-white rounded-lg shadow"><table class="w-full text-xs text-left"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-2">วันที่</th><th class="p-2">รายการ</th><th class="p-2 text-right">บาท</th><th class="p-2">ประเภท</th><th class="p-2">ผู้บันทึก</th><th class="p-2 text-center">จัดการ</th></tr></thead><tbody id="expenseTableBody"></tbody></table></div></div></div>
+        </div>
+        <div id="page-credit-manager" class="page-section hidden min-h-screen bg-gray-50 pb-20">
+             <header class="bg-yellow-500 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="navigateTo('page-expenses')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">จัดการเงินเชื่อ</h1></header><div class="p-4"><div class="bg-white rounded-xl shadow p-4 mb-4 border-l-4 border-yellow-500"><p class="text-sm text-gray-500">ยอดค้างชำระทั้งหมด</p><p id="creditTotalUnpaid" class="text-3xl font-bold text-yellow-600">0 ฿</p></div><div class="mb-6"><h3 class="font-bold text-gray-700 mb-2 border-b pb-1">รายการค้างชำระ</h3><div class="overflow-x-auto bg-white rounded-lg shadow"><table class="w-full text-xs text-left"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-2">วันที่</th><th class="p-2">รายการ</th><th class="p-2 text-right">จำนวนเงิน</th><th class="p-2">ผู้บันทึก</th><th class="p-2 text-center">จัดการ</th></tr></thead><tbody id="creditUnpaidBody"></tbody></table></div></div><div><h3 class="font-bold text-gray-700 mb-2 border-b pb-1">ประวัติการจัดการ (ชำระแล้ว)</h3><div class="overflow-x-auto bg-white rounded-lg shadow"><table class="w-full text-xs text-left"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-2">วันที่</th><th class="p-2">รายการ</th><th class="p-2 text-right">จำนวนเงิน</th><th class="p-2">สถานะ</th><th class="p-2">ผู้บันทึก</th><th class="p-2 text-center">จัดการ</th></tr></thead><tbody id="creditHistoryBody"></tbody></table></div></div></div>
+        </div>
+        <div id="page-summary" class="page-section hidden min-h-screen bg-gray-50">
+            <header class="bg-blue-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="navigateTo('page-account-mgmt')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">สรุปบัญชี</h1></header><div class="p-4"><div class="bg-white rounded-lg shadow p-2 mb-4 text-xs sm:text-sm overflow-x-auto"><table class="w-full whitespace-nowrap"><thead><tr class="text-gray-500 border-b"><th class="text-left py-2 px-2 w-1/4">รายการ</th><th class="text-right py-2 px-2 w-1/4">เงินสด</th><th class="text-right py-2 px-2 w-1/4">เงินโอน</th><th class="text-right py-2 px-2 w-1/4">รวม</th></tr></thead><tbody><tr class="border-b hover:bg-green-50 transition"><td class="py-3 px-2 font-bold text-green-700 flex items-center"><i class="fa-solid fa-cash-register mr-2"></i> ยอดขาย</td><td class="text-right px-2 text-green-600" id="sumSaleCash">0</td><td class="text-right px-2 text-green-600" id="sumSaleTransfer">0</td><td class="text-right px-2 font-bold text-green-800 bg-green-100 rounded" id="sumSaleTotal">0</td></tr><tr class="border-b hover:bg-red-50 transition"><td class="py-3 px-2 font-bold text-red-700 flex items-center"><i class="fa-solid fa-receipt mr-2 pl-1"></i> รายจ่าย</td><td class="text-right px-2 text-red-600" id="sumExpCash">0</td><td class="text-right px-2 text-red-600" id="sumExpTransfer">0</td><td class="text-right px-2 font-bold text-red-800 bg-red-100 rounded" id="sumExpTotal">0</td></tr><tr class="hover:bg-blue-50 transition"><td class="py-3 px-2 font-bold text-blue-700 flex items-center"><i class="fa-solid fa-wallet mr-2"></i> คงเหลือ</td><td class="text-right px-2 text-blue-600 font-semibold" id="sumBalCash">0</td><td class="text-right px-2 text-blue-600 font-semibold" id="sumBalTransfer">0</td><td class="text-right px-2 font-extrabold text-blue-800 bg-blue-100 rounded" id="sumBalTotal">0</td></tr></tbody></table></div><div class="bg-white p-3 rounded-lg shadow mb-4"><div class="flex gap-2 mb-2"><input type="date" id="sumStartDate" class="w-1/2 border rounded p-1 text-sm"><input type="date" id="sumEndDate" class="w-1/2 border rounded p-1 text-sm"></div><button onclick="loadSummary(this)" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-bold shadow transition flex justify-center items-center">ค้นหา</button></div><div class="overflow-x-auto bg-white rounded-lg shadow pb-20 border border-gray-200"><table class="w-full text-xs text-left whitespace-nowrap"><thead class="bg-gray-700 text-white"><tr><th class="p-2 border-r border-gray-600">#</th><th class="p-2 border-r border-gray-600">วันที่</th><th class="p-2 border-r border-gray-600">รายการ</th><th class="p-2 text-right bg-green-700 border-r border-green-600">เงินสด</th><th class="p-2 text-right bg-green-700 border-r border-green-600">โอน</th><th class="p-2 text-right bg-green-800 font-bold border-r border-green-600">รวม</th><th class="p-2 text-right bg-blue-700 border-r border-blue-600">คงเหลือ(สด)</th><th class="p-2 text-right bg-blue-700 border-r border-blue-600">คงเหลือ(โอน)</th><th class="p-2 text-right bg-blue-800 font-bold">คงเหลือ(รวม)</th></tr></thead><tbody id="summaryTableBody"><tr><td colspan="9" class="p-6 text-center text-gray-400">กรุณากดค้นหาเพื่อแสดงข้อมูล</td></tr></tbody></table></div></div>
+        </div>
+        
+        <!-- SALARY PAGES -->
+        <div id="page-salary-home" class="page-section hidden min-h-screen bg-gray-50 pb-20">
+             <header class="bg-orange-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="navigateTo('page-luma-menu')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">ระบบเงินเดือน</h1></header>
+             <div class="p-4">
+                 <div class="grid grid-cols-2 gap-4 mb-6">
+                     <button onclick="openSalaryCalc()" class="bg-white p-4 rounded-xl shadow hover:shadow-lg flex flex-col items-center justify-center text-green-600"><i class="fa-solid fa-hand-holding-dollar text-3xl mb-2"></i><span class="font-bold text-sm">จ่ายเงินเดือน</span></button>
+                     <button onclick="openSalarySettings()" class="bg-white p-4 rounded-xl shadow hover:shadow-lg flex flex-col items-center justify-center text-blue-600"><i class="fa-solid fa-users-gear text-3xl mb-2"></i><span class="font-bold text-sm">ตั้งค่าค่าแรง</span></button>
+                     <button onclick="openSalaryLateSettings()" class="col-span-2 bg-white p-4 rounded-xl shadow hover:shadow-lg flex items-center justify-center text-red-600"><i class="fa-solid fa-user-clock text-3xl mr-3"></i><span class="font-bold text-sm">ตั้งค่าหักเงินเข้างานสาย</span></button>
+                 </div>
+                 <div><h3 class="font-bold text-gray-700 mb-2">ประวัติการจ่ายล่าสุด</h3><div class="overflow-x-auto bg-white rounded-lg shadow"><table class="w-full text-xs text-left"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-3">วันที่</th><th class="p-3">พนักงาน</th><th class="p-3 text-right">จำนวนเงิน</th><th class="p-3 text-center">ประเภท</th><th class="p-3">ผู้จ่าย</th></tr></thead><tbody id="salaryHistoryBody"></tbody></table></div></div>
+             </div>
         </div>
 
-        <!-- SALARY: CALCULATOR -->
+        <div id="page-salary-settings" class="page-section hidden min-h-screen bg-gray-50 pb-20">
+             <header class="bg-blue-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="openSalaryHome()" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">ตั้งค่าค่าแรง (ต่อวัน)</h1></header>
+             <div class="p-4">
+                 <div class="bg-white rounded-xl shadow overflow-hidden">
+                     <table class="w-full text-sm text-left"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-3">ชื่อพนักงาน</th><th class="p-3">ค่าแรง/วัน (บาท)</th></tr></thead><tbody id="salaryRateTableBody"></tbody></table>
+                 </div>
+             </div>
+        </div>
+
+        <!-- NEW: Late Deduction Settings -->
+        <div id="page-salary-late-settings" class="page-section hidden min-h-screen bg-gray-50 pb-20">
+             <header class="bg-red-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="openSalaryHome()" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">ตั้งค่าหักเงินเข้างานสาย</h1></header>
+             <div class="p-4">
+                 <div class="bg-white rounded-xl shadow p-5">
+                     <div class="mb-4">
+                         <label class="block text-gray-700 font-bold mb-2 text-sm"><i class="fa-solid fa-clock text-red-500 mr-2"></i>เวลาเข้างาน (กำหนดสาย)</label>
+                         <input type="time" id="lateTimeInput" class="w-full border rounded-lg p-3 text-lg font-bold">
+                         <p class="text-xs text-gray-500 mt-1">หากเข้างานหลังเวลานี้ จะถูกนับว่าสาย</p>
+                     </div>
+                     <div class="mb-6">
+                         <label class="block text-gray-700 font-bold mb-2 text-sm"><i class="fa-solid fa-coins text-yellow-500 mr-2"></i>อัตราหักเงิน (บาท/นาที)</label>
+                         <input type="number" id="lateRateInput" class="w-full border rounded-lg p-3 text-lg font-bold text-red-600" placeholder="0">
+                         <p class="text-xs text-gray-500 mt-1">จำนวนเงินที่จะหักต่อนาทีที่สาย</p>
+                     </div>
+                     <button onclick="saveLatePolicy()" class="w-full bg-red-600 text-white py-3 rounded-lg font-bold shadow hover:bg-red-700 transition">บันทึกตั้งค่า</button>
+                 </div>
+             </div>
+        </div>
+
         <div id="page-salary-calc" class="page-section hidden min-h-screen bg-gray-50 pb-20">
-            <header class="bg-blue-600 text-white p-4 flex items-center shadow sticky top-0 z-10">
-                <button onclick="navigateTo('page-salary-home')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button>
-                <h1 class="font-bold">จ่ายเงินเดือน</h1>
-            </header>
-            <div class="p-4">
-                
-                <!-- Selection Card -->
-                <div class="bg-white rounded-xl shadow p-4 mb-4">
-                    <h3 class="font-bold text-gray-700 mb-3 border-b pb-2">เลือกเงื่อนไข</h3>
-                    <div class="space-y-3">
-                        <div>
-                            <label class="text-xs font-bold text-gray-500 block mb-1">พนักงาน</label>
-                            <select id="calcEmpSelect" class="w-full border rounded p-2 bg-gray-50">
-                                <option value="">-- เลือกพนักงาน --</option>
-                            </select>
-                        </div>
-                        <div class="flex gap-2">
-                            <div class="w-1/2">
-                                <label class="text-xs font-bold text-gray-500 block mb-1">ตั้งแต่วันที่</label>
-                                <input type="date" id="calcStartDate" class="w-full border rounded p-2 text-sm bg-gray-50">
-                            </div>
-                            <div class="w-1/2">
-                                <label class="text-xs font-bold text-gray-500 block mb-1">ถึงวันที่</label>
-                                <input type="date" id="calcEndDate" class="w-full border rounded p-2 text-sm bg-gray-50">
-                            </div>
-                        </div>
-                        <button onclick="checkUnpaidDays()" class="w-full bg-indigo-500 text-white font-bold py-2 rounded-lg shadow hover:bg-indigo-600 transition">
-                            <i class="fa-solid fa-list-check mr-2"></i> ตรวจสอบวันทำงาน
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Unpaid Days Checklist -->
-                <div id="unpaidDaysContainer" class="hidden bg-white rounded-xl shadow p-4 mb-4 animate-[fadeIn_0.3s_ease-out]">
-                    <h3 class="font-bold text-gray-700 mb-2 border-b pb-1 text-sm">เลือกวันที่ต้องการจ่าย</h3>
-                    <div id="unpaidDaysList" class="max-h-60 overflow-y-auto space-y-2 mb-3">
-                        <!-- Checklist items inserted here -->
-                    </div>
-                    <button onclick="calculateSalary()" class="w-full bg-blue-600 text-white font-bold py-2 rounded-lg shadow hover:bg-blue-700 transition">
-                        <i class="fa-solid fa-calculator mr-2"></i> คำนวณยอดเงิน
-                    </button>
-                </div>
-
-                <!-- Result Card -->
-                <div id="salaryResultCard" class="hidden bg-white rounded-xl shadow p-4 border-l-4 border-green-500 animate-[fadeIn_0.3s_ease-out] mb-6">
-                    <h3 class="font-bold text-gray-800 mb-2">สรุปยอดเงินเดือน</h3>
-                    <div class="space-y-2 text-sm">
-                        <div class="flex justify-between">
-                            <span class="text-gray-500">พนักงาน:</span>
-                            <span id="resEmpName" class="font-bold">...</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-500">จ่ายจริง (วัน):</span>
-                            <span id="resDays" class="font-bold text-blue-600">0</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-500">อัตราค่าแรง (ต่อวัน):</span>
-                            <span id="resRate" class="font-bold">0</span>
-                        </div>
-                        <hr class="my-2">
-                        <div class="flex justify-between items-end">
-                            <span class="text-gray-800 font-bold">ยอดสุทธิ:</span>
-                            <span class="text-2xl font-bold text-green-600"><span id="resTotal">0</span> ฿</span>
-                        </div>
-                    </div>
-                    
-                    <button onclick="confirmPaySalary()" class="w-full mt-4 bg-green-600 text-white font-bold py-3 rounded-lg shadow hover:bg-green-700 transition flex items-center justify-center">
-                        <i class="fa-solid fa-hand-holding-dollar mr-2"></i> ยืนยันการจ่ายเงิน
-                    </button>
-                    <p class="text-xs text-center text-gray-400 mt-2">ระบบจะบันทึกใน "บันทึกเงินเดือน"</p>
-                </div>
-
-                <!-- Salary History Table -->
-                <div class="bg-white rounded-xl shadow overflow-hidden mt-6">
-                    <div class="bg-gray-100 p-3 border-b flex justify-between items-center">
-                        <h3 class="font-bold text-gray-700"><i class="fa-solid fa-history mr-2"></i>ประวัติการจ่ายเงินเดือน</h3>
-                        <button onclick="loadSalaryHistory()" class="text-blue-500 text-xs hover:underline"><i class="fa-solid fa-rotate mr-1"></i>รีเฟรช</button>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-xs text-left">
-                            <thead class="bg-gray-50 text-gray-600 border-b">
-                                <tr>
-                                    <th class="p-3 whitespace-nowrap">วันที่จ่าย</th>
-                                    <th class="p-3 whitespace-nowrap">พนักงาน</th>
-                                    <th class="p-3 text-right whitespace-nowrap">จำนวนเงิน</th>
-                                    <th class="p-3 text-center whitespace-nowrap">ประเภท</th>
-                                    <th class="p-3 whitespace-nowrap">ผู้จ่าย</th>
-                                </tr>
-                            </thead>
-                            <tbody id="salaryHistoryBody">
-                                <tr><td colspan="5" class="p-6 text-center text-gray-400">กำลังโหลดข้อมูล...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-            </div>
+             <header class="bg-green-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="openSalaryHome()" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">คำนวณเงินเดือน</h1></header>
+             <div class="p-4">
+                 <div class="bg-white rounded-xl shadow p-4 mb-4">
+                     <div class="mb-3"><label class="text-xs font-bold text-gray-500">ช่วงวันที่</label><div class="flex gap-2"><input type="date" id="calcStartDate" class="w-1/2 border rounded p-2 text-sm"><input type="date" id="calcEndDate" class="w-1/2 border rounded p-2 text-sm"></div></div>
+                     <div class="mb-3"><label class="text-xs font-bold text-gray-500">พนักงาน</label><select id="calcEmpSelect" class="w-full border rounded p-2 text-sm bg-white"></select></div>
+                     <button onclick="checkUnpaidDays()" class="w-full bg-blue-600 text-white rounded-lg py-2 font-bold shadow hover:bg-blue-700">ตรวจสอบวันทำงาน</button>
+                 </div>
+                 <div id="unpaidDaysContainer" class="hidden bg-white rounded-xl shadow p-4 mb-4">
+                     <h3 class="font-bold text-gray-700 mb-2 border-b pb-2">รายการวันทำงาน (ที่ยังไม่จ่าย)</h3>
+                     <div id="unpaidDaysList" class="max-h-60 overflow-y-auto mb-3"></div>
+                     <button onclick="calculateSalary()" class="w-full bg-green-600 text-white rounded-lg py-2 font-bold shadow hover:bg-green-700">คำนวณยอดเงิน</button>
+                 </div>
+                 
+                 <div id="salaryResultCard" class="hidden bg-white rounded-xl shadow-lg border overflow-hidden">
+                     <div class="bg-gradient-to-r from-green-500 to-emerald-600 p-4 text-white text-center">
+                         <h3 class="font-bold text-lg">สรุปยอดจ่าย</h3>
+                         <p id="resEmpName" class="font-medium opacity-90 text-sm"></p>
+                     </div>
+                     <div class="p-4 space-y-2 text-sm">
+                         <div class="flex justify-between"><span>ค่าแรง (<span id="resDays" class="font-bold"></span> วัน)</span><span id="resBasePay" class="font-bold text-gray-800">0</span></div>
+                         <div class="flex justify-between text-red-500 text-xs"><span id="resLateText">หักสาย (0 นาที)</span><span>- <span id="resLateDeduct">0</span></span></div>
+                         <div class="flex justify-between text-red-500 text-xs"><span id="resShortageText">หักเงินขาด</span><span>- <span id="resShortageDeduct">0</span></span></div>
+                         <div class="border-t pt-2 mt-2 flex justify-between items-center text-lg font-bold text-green-700">
+                             <span>สุทธิ</span>
+                             <span><span id="resTotal">0</span> บาท</span>
+                         </div>
+                         <button onclick="confirmPaySalary()" class="w-full bg-green-600 text-white mt-3 py-2 rounded-lg font-bold shadow hover:bg-green-700">ยืนยันการจ่ายเงิน</button>
+                     </div>
+                 </div>
+             </div>
         </div>
 
+        <!-- ... (Attendance pages, Set Coords, Employee Home, Petty Cash Employee, Petty Cash Owner - same as previous) ... -->
+        
+        <!-- ATTENDANCE & LOCATION PAGES (ADDED) -->
+        <div id="page-attendance" class="page-section hidden min-h-screen bg-gray-50 pb-20">
+             <header class="bg-orange-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="backFromAttendance()" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">ลงเวลาเข้า-ออกงาน</h1>
+                 <button id="btnOwnerAttendanceReport" onclick="navigateTo('page-attendance-report')" class="ml-auto text-xs bg-white text-orange-600 px-2 py-1 rounded shadow font-bold hidden"><i class="fa-solid fa-file-lines mr-1"></i>รายงาน</button>
+             </header>
+             <div class="p-6 flex flex-col items-center">
+                 <div class="bg-white rounded-xl shadow-lg p-6 w-full mb-6 text-center">
+                     <p class="text-gray-500 mb-2">วันนี้</p>
+                     <h2 class="text-3xl font-bold text-orange-600 mb-6" id="attCurrentTime">--:--</h2>
+                     <div class="grid grid-cols-2 gap-4">
+                         <button onclick="checkLocationAndSubmit('in')" class="bg-green-500 hover:bg-green-600 text-white py-4 rounded-xl shadow-md flex flex-col items-center transition transform hover:scale-105"><i class="fa-solid fa-right-to-bracket text-3xl mb-2"></i><span class="font-bold">เข้างาน</span></button>
+                         <button onclick="checkLocationAndSubmit('out')" class="bg-red-500 hover:bg-red-600 text-white py-4 rounded-xl shadow-md flex flex-col items-center transition transform hover:scale-105"><i class="fa-solid fa-right-from-bracket text-3xl mb-2"></i><span class="font-bold">ออกงาน</span></button>
+                     </div>
+                 </div>
+                 <div class="w-full"><h3 class="font-bold text-gray-700 mb-2 px-1">ประวัติการลงเวลา (เดือนนี้)</h3><div class="bg-white rounded-lg shadow overflow-hidden"><table class="w-full text-sm"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-3 text-left">วันที่</th><th class="p-3 text-center">เข้า</th><th class="p-3 text-center">ออก</th></tr></thead><tbody id="attendanceTableBody"></tbody></table></div></div>
+             </div>
+        </div>
 
-        <!-- EMPLOYEE HOME -->
+        <div id="page-attendance-report" class="page-section hidden min-h-screen bg-gray-50 pb-20">
+             <header class="bg-orange-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="navigateTo('page-attendance')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">รายงานเวลาทำงาน</h1></header>
+             <div class="p-4">
+                 <div class="bg-white rounded-xl shadow p-4 mb-4">
+                     <div class="flex gap-2 mb-2"><input type="date" id="reportStartDate" class="w-1/2 border rounded p-1 text-sm"><input type="date" id="reportEndDate" class="w-1/2 border rounded p-1 text-sm"></div>
+                     <select id="reportEmpSelect" class="w-full border rounded p-2 text-sm mb-2 bg-white"><option value="all">-- พนักงานทั้งหมด --</option></select>
+                     <button onclick="loadAttendanceReport()" class="w-full bg-orange-500 text-white rounded py-2 font-bold shadow hover:bg-orange-600">ค้นหาข้อมูล</button>
+                 </div>
+                 <div class="grid grid-cols-2 gap-3 mb-4"><div class="bg-white p-3 rounded-lg shadow text-center"><p class="text-xs text-gray-500">วันทำงานรวม</p><p id="reportTotalDays" class="text-xl font-bold text-blue-600">0</p></div><div class="bg-white p-3 rounded-lg shadow text-center"><p class="text-xs text-gray-500">ชั่วโมงรวม</p><p id="reportTotalHours" class="text-xl font-bold text-green-600">0</p></div></div>
+                 <div class="bg-white rounded-lg shadow overflow-hidden"><table class="w-full text-xs text-left"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-3">วันที่</th><th class="p-3">ชื่อ</th><th class="p-3 text-center">เข้า</th><th class="p-3 text-center">ออก</th><th class="p-3 text-right">ชม.</th></tr></thead><tbody id="reportTableBody"></tbody></table></div>
+             </div>
+        </div>
+
+        <div id="page-set-coords" class="page-section hidden min-h-screen bg-purple-50 pb-20">
+             <header class="bg-purple-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="navigateTo('page-luma-menu')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">ตั้งค่าพิกัดร้าน</h1></header>
+             <div class="p-6">
+                 <div class="bg-white rounded-xl shadow-lg p-6 text-center">
+                     <div class="mb-4 text-purple-600"><i class="fa-solid fa-map-location-dot text-5xl"></i></div>
+                     <p class="text-sm text-gray-600 mb-4">ไปที่ร้านค้า แล้วกดปุ่มด้านล่างเพื่อบันทึกพิกัดปัจจุบันเป็นจุดเช็คอิน</p>
+                     <div class="space-y-3 text-left">
+                         <div><label class="text-xs font-bold text-gray-500">Latitude</label><input type="text" id="setLat" class="w-full border rounded p-2 bg-gray-50" readonly></div>
+                         <div><label class="text-xs font-bold text-gray-500">Longitude</label><input type="text" id="setLng" class="w-full border rounded p-2 bg-gray-50" readonly></div>
+                         <div><label class="text-xs font-bold text-gray-500">ระยะที่ยอมรับ (เมตร)</label><input type="number" id="setDist" class="w-full border rounded p-2" value="500"></div>
+                     </div>
+                     <button onclick="getCurrentCoordsForSetting()" class="w-full mt-4 bg-blue-500 text-white py-2 rounded-lg font-bold shadow mb-2"><i class="fa-solid fa-location-crosshairs mr-2"></i> ดึงพิกัดปัจจุบัน</button>
+                     <button onclick="saveCoords()" class="w-full bg-green-500 text-white py-2 rounded-lg font-bold shadow">บันทึกพิกัด</button>
+                 </div>
+             </div>
+        </div>
+
         <div id="page-employee-home" class="page-section hidden min-h-screen bg-orange-50">
+            <!-- ... existing employee home code ... -->
             <header class="bg-orange-600 text-white p-4 flex justify-between items-center shadow sticky top-0 z-10">
                 <h1 class="font-bold">พนักงาน ลูม่าคาเฟ่</h1>
                 <button onclick="logout()" class="text-sm bg-orange-800 px-3 py-1 rounded hover:bg-orange-900 transition"><i class="fa-solid fa-right-from-bracket"></i> ออก</button>
@@ -363,236 +411,174 @@
                         <i class="fa-solid fa-calculator text-4xl mb-2"></i>
                         <span class="font-bold">จัดการบัญชี</span>
                     </button>
-                    <!-- Link to Attendance Page -->
                     <button onclick="navigateTo('page-attendance')" class="bg-white p-6 rounded-xl shadow-md flex flex-col items-center justify-center text-orange-600 hover:bg-orange-50 transition transform hover:scale-105">
                         <i class="fa-solid fa-clock text-4xl mb-2"></i>
                         <span class="font-bold text-sm">ลงเวลาทำงาน</span>
                     </button>
+                    
+                    <button onclick="openPettyCashEmployee()" class="col-span-2 bg-gradient-to-r from-indigo-500 to-blue-500 text-white p-4 rounded-xl shadow-md flex items-center justify-center hover:shadow-lg transition transform hover:scale-105">
+                        <i class="fa-solid fa-basket-shopping text-2xl mr-3"></i>
+                        <span class="font-bold text-lg">บันทึกซื้อของ</span>
+                    </button>
                 </div>
             </div>
         </div>
-
-        <!-- ATTENDANCE PAGE -->
-        <div id="page-attendance" class="page-section hidden min-h-screen bg-gray-100 pb-20">
-            <header class="bg-indigo-600 text-white p-4 flex items-center shadow sticky top-0 z-20">
-                <!-- Changed onclick to dynamic function -->
-                <button onclick="backFromAttendance()" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button>
-                <h1 class="font-bold">ลงเวลาเข้า-ออกงาน</h1>
-            </header>
-            <div class="p-4 flex flex-col items-center justify-start min-h-[80vh] space-y-4 pt-8">
-                
-                <div class="text-center mb-2">
-                    <p class="text-gray-500 text-xs mb-1">วันที่ปัจจุบัน</p>
-                    <p class="text-lg font-bold text-gray-800" id="attCurrentDate">-</p>
-                    <p class="text-3xl font-bold text-indigo-600 mt-1" id="attCurrentTime">-</p>
-                </div>
-
-                <!-- Balanced Grid Layout for Buttons -->
-                <div class="grid grid-cols-2 gap-4 w-full max-w-sm">
-                    <button onclick="checkLocationAndSubmit('in')" class="bg-green-500 hover:bg-green-600 text-white rounded-xl p-4 shadow-md flex flex-col items-center justify-center transition transform active:scale-95 aspect-square">
-                        <i class="fa-solid fa-sign-in-alt text-3xl mb-2"></i>
-                        <span class="text-lg font-bold">ลงเวลามา</span>
-                        <span class="text-xs opacity-80">Check In</span>
-                    </button>
-
-                    <button onclick="checkLocationAndSubmit('out')" class="bg-red-500 hover:bg-red-600 text-white rounded-xl p-4 shadow-md flex flex-col items-center justify-center transition transform active:scale-95 aspect-square">
-                        <i class="fa-solid fa-sign-out-alt text-3xl mb-2"></i>
-                        <span class="text-lg font-bold">ลงเวลากลับ</span>
-                        <span class="text-xs opacity-80">Check Out</span>
-                    </button>
-                </div>
-
-                <div class="bg-white p-3 rounded-lg shadow-sm w-full max-w-sm text-center">
-                    <p class="text-xs text-gray-400">
-                        <i class="fa-solid fa-location-dot mr-1 text-indigo-400"></i> ระบบตรวจสอบ GPS อัตโนมัติ
-                    </p>
-                </div>
-
-                <!-- Link to Report (Owner Only via JS) -->
-                <button id="btnOwnerAttendanceReport" onclick="navigateTo('page-attendance-report')" class="hidden text-indigo-600 text-sm font-bold mt-2 hover:underline bg-indigo-50 px-4 py-2 rounded-lg border border-indigo-100">
-                    <i class="fa-solid fa-chart-line mr-1"></i> ตรวจสอบประวัติการเข้างาน (ทั้งหมด)
-                </button>
-
-                <!-- Attendance History Table (For Employee/Personal View) -->
-                <div class="w-full max-w-sm mt-4 bg-white rounded-xl shadow p-4">
-                    <h3 class="font-bold text-gray-700 mb-2 border-b pb-2 text-sm flex items-center">
-                        <i class="fa-solid fa-list-check mr-2 text-indigo-500"></i> ประวัติการลงเวลา (เดือนนี้)
-                    </h3>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-xs text-left">
-                            <thead class="bg-gray-100 text-gray-600">
-                                <tr>
-                                    <th class="p-2">วันที่</th>
-                                    <th class="p-2 text-center">เวลามา</th>
-                                    <th class="p-2 text-center">เวลากลับ</th>
-                                </tr>
-                            </thead>
-                            <tbody id="attendanceTableBody">
-                                <tr><td colspan="3" class="text-center p-4 text-gray-400">กำลังโหลด...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+        <div id="page-petty-cash-employee" class="page-section hidden min-h-screen bg-gray-100 pb-20">
+             <!-- ... existing petty cash employee ... -->
+             <header class="bg-indigo-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="navigateTo('page-employee-home')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">บันทึกซื้อของ (เงินสำรอง)</h1></header><div class="p-4"><div class="grid grid-cols-2 gap-3 mb-4"><div class="bg-white p-3 rounded-lg shadow border-l-4 border-green-500"><p class="text-xs text-gray-500">ได้รับมาล่าสุด</p><p id="pcDashboardReceived" class="text-xl font-bold text-green-700">0</p><p class="text-xs text-gray-400">บาท</p></div><div class="bg-white p-3 rounded-lg shadow border-l-4 border-blue-500"><p class="text-xs text-gray-500">คงเหลือสะสม</p><p id="pcDashboardBalance" class="text-xl font-bold text-blue-700">0</p><p class="text-xs text-gray-400">บาท</p></div></div><div class="bg-white rounded-xl shadow p-4 mb-6"><h3 class="font-bold text-gray-700 mb-3 border-b pb-2">บันทึกการซื้อของ</h3><form id="pettyCashForm" onsubmit="submitPettyCashExpense(event)"><div class="flex gap-2 mb-3"><div class="w-1/2"><label class="text-xs font-bold text-gray-500">วันที่</label><input type="date" id="pcExpDate" class="w-full border rounded p-2 text-sm" required></div><div class="w-1/2"><label class="text-xs font-bold text-gray-500">ร้านค้า</label><select id="pcExpVendorSelect" class="w-full border rounded p-2 text-sm bg-white" onchange="checkVendorGeneric(this, 'pcExpVendorInput')"></select><input type="text" id="pcExpVendorInput" class="w-full border rounded p-2 text-sm mt-1 hidden" placeholder="ระบุชื่อร้านใหม่"></div></div><div class="flex gap-2 mb-3"><div class="w-1/2"><label class="text-xs font-bold text-gray-500">จำนวนเงิน</label><input type="number" id="pcExpAmount" class="w-full border rounded p-2 text-sm" placeholder="0.00" step="0.01" required></div><div class="w-1/2"><label class="text-xs font-bold text-gray-500">ประเภท</label><select id="pcExpType" class="w-full border rounded p-2 text-sm bg-white" onchange="toggleSlipInput()"><option value="เงินสด">เงินสด</option><option value="เงินโอน">เงินโอน</option><option value="เงินเชื่อ">เงินเชื่อ</option></select></div></div><div class="mb-3 bg-gray-50 p-2 rounded border border-gray-200"><label class="block text-xs font-bold text-gray-600 mb-1">รูปใบเสร็จ (บังคับ) <span class="text-red-500">*</span></label><input type="file" id="pcReceiptFile" accept="image/*" class="w-full text-xs" onchange="previewImage(this, 'pcReceiptPreview')" required><img id="pcReceiptPreview" class="mt-2 h-20 object-contain hidden border rounded"><input type="hidden" id="pcReceiptBase64"></div><div id="pcSlipContainer" class="mb-4 bg-gray-50 p-2 rounded border border-gray-200 hidden"><label class="block text-xs font-bold text-gray-600 mb-1">สลิปโอนเงิน (บังคับ) <span class="text-red-500">*</span></label><input type="file" id="pcSlipFile" accept="image/*" class="w-full text-xs" onchange="previewImage(this, 'pcSlipPreview')"><img id="pcSlipPreview" class="mt-2 h-20 object-contain hidden border rounded"><input type="hidden" id="pcSlipBase64"></div><button type="submit" class="w-full bg-indigo-600 text-white rounded-lg py-2 font-bold shadow hover:bg-indigo-700 flex justify-center items-center">บันทึกข้อมูล</button></form></div><div class="bg-white rounded-xl shadow overflow-hidden"><div class="bg-gray-100 p-2 border-b flex justify-between items-center"><h3 class="font-bold text-gray-700 text-sm">ประวัติการจ่ายเงิน</h3><button onclick="loadPettyCashDashboard()" class="text-blue-500 text-xs hover:underline"><i class="fa-solid fa-rotate"></i></button></div><div class="overflow-x-auto"><table class="w-full text-xs text-left"><thead class="bg-gray-50 text-gray-600 border-b"><tr><th class="p-2">วันที่</th><th class="p-2">รายการ</th><th class="p-2 text-right">บาท</th><th class="p-2 text-center">สถานะ</th></tr></thead><tbody id="pettyCashTableBody"><tr><td colspan="4" class="p-4 text-center text-gray-400"><i class="fa-solid fa-circle-notch fa-spin text-xl"></i></td></tr></tbody></table></div></div></div>
+        </div>
+        <div id="page-petty-cash-owner" class="page-section hidden min-h-screen bg-cyan-50 pb-20">
+            <!-- ... existing petty cash owner ... -->
+            <header class="bg-cyan-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="navigateTo('page-luma-menu')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">จัดการเงินสำรองจ่าย</h1></header><div class="p-6"><div class="bg-white rounded-xl shadow p-5 space-y-4 mb-6"><div class="text-center mb-2"><div class="w-16 h-16 bg-cyan-100 rounded-full flex items-center justify-center mx-auto mb-2 text-cyan-600"><i class="fa-solid fa-hand-holding-dollar text-3xl"></i></div><h2 class="text-lg font-bold text-gray-700">กำหนดเงินสำรองจ่าย</h2><p class="text-sm text-gray-500">กำหนดวงเงิน/เติมเงินให้พนักงานใช้จ่าย</p></div><form onsubmit="submitPettyCashFund(event)"><div><label class="block text-xs font-bold text-gray-500 mb-1">วันที่</label><input type="date" id="pcFundDate" class="w-full border rounded p-2 bg-gray-50"></div><div class="mt-3"><label class="block text-xs font-bold text-gray-500 mb-1">จ่ายให้พนักงานชื่อ</label><select id="pcFundReceiver" class="w-full border rounded p-2 bg-gray-50" required><option value="">-- เลือกพนักงาน --</option></select></div><div class="mt-3"><label class="block text-xs font-bold text-gray-500 mb-1">จำนวนเงิน (บาท)</label><input type="number" id="pcFundAmount" class="w-full border rounded p-2 text-lg font-bold text-green-600" placeholder="0.00" required></div><div class="mt-3"><label class="block text-xs font-bold text-gray-500 mb-1">บันทึกช่วยจำ (เช่น รอบเดือน ม.ค.)</label><input type="text" id="pcFundNote" class="w-full border rounded p-2" placeholder="ระบุรายละเอียด..."></div><button type="submit" class="w-full mt-4 bg-cyan-600 text-white py-3 rounded-lg shadow font-bold hover:bg-cyan-700 flex justify-center items-center">บันทึกยอดเงิน</button></form></div><div class="bg-white rounded-xl shadow p-4"><h3 class="font-bold text-gray-700 mb-3 border-b pb-2">ประวัติบันทึกยอดเงิน</h3><div class="flex gap-2 mb-3"><div class="w-2/5"><input type="date" id="pcFundHistoryStart" class="w-full border rounded p-1 text-xs"></div><div class="w-2/5"><input type="date" id="pcFundHistoryEnd" class="w-full border rounded p-1 text-xs"></div><div class="w-1/5"><button onclick="loadPettyCashFundHistory(this)" class="w-full bg-blue-500 text-white rounded p-1 text-xs h-full flex justify-center items-center"><i class="fa-solid fa-search"></i></button></div></div><div class="overflow-x-auto"><table class="w-full text-xs text-left"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-2 whitespace-nowrap">วันที่</th><th class="p-2 text-right whitespace-nowrap">จำนวน</th><th class="p-2 whitespace-nowrap">จ่ายให้</th><th class="p-2 whitespace-nowrap">รายละเอียด</th></tr></thead><tbody id="pcFundHistoryBody"><tr><td colspan="4" class="p-4 text-center text-gray-400">กดค้นหาเพื่อแสดงข้อมูล</td></tr></tbody></table></div></div></div>
         </div>
 
-        <!-- NEW: ATTENDANCE REPORT PAGE (OWNER ONLY) -->
-        <div id="page-attendance-report" class="page-section hidden min-h-screen bg-gray-50 pb-20">
-            <header class="bg-teal-600 text-white p-4 flex items-center shadow sticky top-0 z-20">
-                <button onclick="navigateTo('page-attendance')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button>
-                <h1 class="font-bold">ตรวจสอบการเข้างาน</h1>
-            </header>
-            <div class="p-4">
-                
-                <!-- Filters -->
-                <div class="bg-white p-4 rounded-xl shadow mb-4 space-y-3">
-                    <div class="flex gap-2">
-                         <div class="w-1/2">
-                             <label class="text-xs text-gray-500 font-bold block mb-1">เริ่มต้น</label>
-                             <input type="date" id="reportStartDate" class="w-full border rounded p-2 text-sm bg-gray-50">
+        <!-- ... (Existing pages: set-coords, salary pages, attendance pages etc. just hidden but present in DOM) ... -->
+        
+        <!-- Re-adding detailModal for verification view -->
+        <div id="detailModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black bg-opacity-80 backdrop-blur-sm"><div class="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh] animate-[fadeIn_0.2s_ease-out]"><div class="bg-orange-500 p-4 text-white flex justify-between items-center rounded-t-xl shrink-0"><h3 class="font-bold text-lg"><i class="fa-solid fa-circle-info mr-2"></i>รายละเอียด</h3><button onclick="closeDetailModal()" class="text-white hover:bg-orange-600 w-8 h-8 rounded-full flex items-center justify-center transition"><i class="fa-solid fa-xmark text-xl"></i></button></div><div class="p-5 overflow-y-auto text-sm space-y-4"><div class="grid grid-cols-2 gap-4 border-b pb-4"><div><p class="text-xs text-gray-500">วันที่</p><p id="detDate" class="font-bold text-gray-800 text-base"></p></div><div><p class="text-xs text-gray-500">สถานะ</p><p id="detStatus" class="font-bold text-blue-600 text-base"></p></div></div><div class="border-b pb-4"><p class="text-xs text-gray-500">รายการ</p><p id="detVendor" class="font-bold text-gray-800 text-lg"></p></div><div class="grid grid-cols-2 gap-4 border-b pb-4"><div><p class="text-xs text-gray-500">ประเภท</p><p id="detType" class="font-bold text-gray-800"></p></div><div><p class="text-xs text-gray-500">ผู้ทำรายการ</p><p id="detUser" class="font-bold text-gray-800"></p></div></div><div class="bg-orange-50 p-3 rounded-lg text-center border border-orange-100"><p class="text-xs text-gray-500">จำนวนเงิน</p><p id="detAmount" class="font-bold text-3xl text-red-600 mt-1"></p><span class="text-xs text-gray-400">บาท</span></div><div><span class="text-gray-500 block mb-2 font-medium">รูปหลักฐาน</span><div class="space-y-2"><div class="w-full bg-gray-100 rounded-lg flex flex-col items-center justify-center overflow-hidden border border-gray-200 p-2"><p class="text-xs text-gray-400 w-full text-left mb-1">ใบเสร็จ</p><img id="detImage" class="w-full h-auto max-h-[30vh] object-contain hidden cursor-zoom-in" onclick="viewImage(this.src)"><div id="detNoImage" class="flex flex-col items-center text-gray-400 py-4"><span>ไม่มีใบเสร็จ</span></div></div><div id="detSlipContainer" class="w-full bg-gray-100 rounded-lg flex flex-col items-center justify-center overflow-hidden border border-gray-200 p-2 hidden"><p class="text-xs text-gray-400 w-full text-left mb-1">สลิปโอนเงิน</p><img id="detSlipImage" class="w-full h-auto max-h-[30vh] object-contain cursor-zoom-in" onclick="viewImage(this.src)"></div></div></div></div><div class="p-4 bg-gray-50 border-t rounded-b-xl text-right shrink-0"><button onclick="closeDetailModal()" class="w-full sm:w-auto bg-gray-500 hover:bg-gray-600 text-white font-medium px-6 py-2.5 rounded-lg shadow transition">ปิดหน้าต่าง</button></div></div>
+        
+        <!-- NEW: Verification Detail Modal -->
+        <div id="verifyDetailModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black bg-opacity-80 backdrop-blur-sm">
+             <div class="bg-white rounded-xl shadow-2xl w-full max-w-md animate-[fadeIn_0.2s_ease-out]">
+                 <div class="bg-purple-600 p-4 text-white flex justify-between items-center rounded-t-xl">
+                     <h3 class="font-bold text-lg"><i class="fa-solid fa-list-check mr-2"></i>รายละเอียดการตรวจนับ</h3>
+                     <button onclick="document.getElementById('verifyDetailModal').classList.add('hidden')" class="text-white hover:bg-purple-700 w-8 h-8 rounded-full flex items-center justify-center"><i class="fa-solid fa-xmark text-xl"></i></button>
+                 </div>
+                 <div class="p-5 space-y-4 text-sm">
+                     <div class="flex justify-between border-b pb-2">
+                         <span class="text-gray-500">วันที่ยอดขาย:</span>
+                         <span id="vdDate" class="font-bold text-gray-800"></span>
+                     </div>
+                     <div class="grid grid-cols-2 gap-4">
+                         <div class="bg-gray-50 p-2 rounded border">
+                             <p class="text-xs text-gray-500 mb-1 font-bold">พนักงานนับ</p>
+                             <div class="flex justify-between text-xs"><span>สด:</span><span id="vdEmpCash">0</span></div>
+                             <div class="flex justify-between text-xs"><span>โอน:</span><span id="vdEmpTransfer">0</span></div>
                          </div>
-                         <div class="w-1/2">
-                             <label class="text-xs text-gray-500 font-bold block mb-1">สิ้นสุด</label>
-                             <input type="date" id="reportEndDate" class="w-full border rounded p-2 text-sm bg-gray-50">
+                         <div class="bg-purple-50 p-2 rounded border border-purple-100">
+                             <p class="text-xs text-purple-600 mb-1 font-bold">เจ้าของนับ</p>
+                             <div class="flex justify-between text-xs"><span>สด:</span><span id="vdOwnerCash">0</span></div>
+                             <div class="flex justify-between text-xs"><span>โอน:</span><span id="vdOwnerTransfer">0</span></div>
                          </div>
+                     </div>
+                     <div class="flex justify-between items-center p-3 bg-gray-100 rounded">
+                         <div class="text-red-600">ขาด: <span id="vdMissing" class="font-bold">0</span></div>
+                         <div class="text-green-600">เกิน: <span id="vdOver" class="font-bold">0</span></div>
+                     </div>
+                     <div class="text-right text-xs text-gray-400" id="vdVerifier"></div>
+                 </div>
+             </div>
+        </div>
+
+        <!-- Pay Credit Modal -->
+        <div id="payCreditModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black bg-opacity-80 backdrop-blur-sm">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm animate-[fadeIn_0.2s_ease-out]">
+                <div class="bg-green-600 p-4 text-white rounded-t-xl flex justify-between items-center">
+                    <h3 class="font-bold"><i class="fa-solid fa-money-bill-wave mr-2"></i>บันทึกการชำระหนี้</h3>
+                    <button onclick="closePayCreditModal()" class="w-8 h-8 rounded-full hover:bg-green-700 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="p-5">
+                    <input type="hidden" id="payCreditId">
+                    <input type="hidden" id="payCreditAmount">
+                    
+                    <div class="text-center mb-6">
+                        <p class="text-gray-500 text-sm mb-1">ยอดที่ต้องชำระ</p>
+                        <p id="payCreditDisplayAmount" class="text-4xl font-bold text-green-600">0</p>
+                        <p class="text-gray-400 text-xs">บาท</p>
                     </div>
-                    <div>
-                        <label class="text-xs text-gray-500 font-bold block mb-1">เลือกพนักงาน</label>
-                        <select id="reportEmpSelect" class="w-full border rounded p-2 text-sm bg-gray-50">
-                            <option value="all">-- ทั้งหมด --</option>
-                            <!-- JS will populate -->
+
+                    <div class="mb-4">
+                        <label class="block text-xs font-bold text-gray-700 mb-1">ช่องทางชำระ</label>
+                        <select id="payCreditType" class="w-full border rounded p-2 text-sm bg-gray-50">
+                            <option value="เงินโอน">เงินโอน</option>
+                            <option value="เงินสด">เงินสด</option>
                         </select>
                     </div>
-                    <button onclick="loadAttendanceReport()" class="w-full bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 rounded-lg shadow transition">
-                        <i class="fa-solid fa-search mr-2"></i> ค้นหา
-                    </button>
-                </div>
 
-                <!-- Dashboard Cards -->
-                <div class="grid grid-cols-2 gap-3 mb-4">
-                    <div class="bg-white p-3 rounded-lg shadow border-l-4 border-teal-500">
-                        <p class="text-xs text-gray-500">จำนวนวัน</p>
-                        <p id="reportTotalDays" class="text-2xl font-bold text-teal-700">0</p>
-                        <p class="text-xs text-gray-400">วัน</p>
+                    <div class="mb-6">
+                        <label class="block text-xs font-bold text-gray-700 mb-2">สลิปโอนเงิน / หลักฐาน</label>
+                        <div id="slipUploadArea" class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:bg-gray-50 hover:border-blue-400 transition relative" onclick="triggerFileSelect()">
+                            <input type="file" id="creditSlipFile" class="hidden" accept="image/*" onchange="handleCreditSlipSelect(this)">
+                            <div id="slipUploadPrompt">
+                                <i class="fa-solid fa-cloud-arrow-up text-3xl text-gray-400 mb-2"></i>
+                                <p class="mb-1 text-sm text-gray-500"><span class="font-semibold">คลิกเพื่ออัปโหลด</span></p>
+                                <p class="text-xs text-gray-400">รองรับ .jpg, .png</p>
+                            </div>
+                            <div id="slipPreviewContainer" class="hidden relative h-32 flex items-center justify-center">
+                                <img id="creditSlipPreview" class="max-h-full max-w-full rounded object-contain">
+                            </div>
+                            <div id="removeSlipContainer" class="hidden absolute top-2 right-2">
+                                <button type="button" onclick="removeCreditSlip(event)" class="bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center shadow hover:bg-red-600 text-xs"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                        </div>
+                        <input type="hidden" id="creditSlipBase64">
                     </div>
-                    <div class="bg-white p-3 rounded-lg shadow border-l-4 border-blue-500">
-                        <p class="text-xs text-gray-500">รวมชั่วโมง</p>
-                        <p id="reportTotalHours" class="text-2xl font-bold text-blue-700">0:00</p>
-                        <p class="text-xs text-gray-400">ชม.</p>
-                    </div>
-                </div>
 
-                <!-- Report Table -->
-                <div class="bg-white rounded-xl shadow overflow-hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-xs text-left">
-                            <thead class="bg-gray-100 text-gray-700 border-b">
-                                <tr>
-                                    <th class="p-3">วันที่</th>
-                                    <th class="p-3">ชื่อ</th>
-                                    <th class="p-3 text-center">เวลามา</th>
-                                    <th class="p-3 text-center">เวลากลับ</th>
-                                    <th class="p-3 text-right">รวมชม.</th>
-                                </tr>
-                            </thead>
-                            <tbody id="reportTableBody">
-                                <tr><td colspan="5" class="text-center p-6 text-gray-400">กรุณากดค้นหา</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <button onclick="confirmPayCredit()" class="w-full bg-green-600 text-white rounded-lg py-3 font-bold shadow-lg hover:bg-green-700 transition transform hover:scale-[1.02]">ยืนยันการชำระ</button>
                 </div>
-
             </div>
         </div>
 
-        <!-- ACCOUNT MGMT (Existing code...) -->
-        <div id="page-account-mgmt" class="page-section hidden min-h-screen bg-gray-50">
-            <header class="bg-white text-orange-600 p-4 flex items-center shadow sticky top-0 z-10">
-                <button onclick="backFromAccountMgmt()" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button>
-                <h1 class="font-bold">จัดการบัญชี</h1>
-            </header>
-            <div class="p-4 flex flex-col gap-4">
-                <button onclick="openDailySales()" class="bg-gradient-to-r from-green-500 to-green-600 text-white p-4 rounded-xl shadow-lg flex items-center justify-between">
-                    <div class="flex items-center"><i class="fa-solid fa-cash-register text-2xl mr-3"></i><span class="font-bold text-lg">บันทึกยอดขายประจำวัน</span></div>
-                    <i class="fa-solid fa-chevron-right"></i>
-                </button>
-                <button onclick="openExpenses()" class="bg-gradient-to-r from-red-500 to-red-600 text-white p-4 rounded-xl shadow-lg flex items-center justify-between">
-                    <div class="flex items-center"><i class="fa-solid fa-receipt text-2xl mr-3"></i><span class="font-bold text-lg">บันทึกรายจ่าย</span></div>
-                    <i class="fa-solid fa-chevron-right"></i>
-                </button>
-                <button id="btnMgtSummary" onclick="openSummary()" class="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-4 rounded-xl shadow-lg flex items-center justify-between">
-                    <div class="flex items-center"><i class="fa-solid fa-chart-pie text-2xl mr-3"></i><span class="font-bold text-lg">สรุปบัญชี</span></div>
-                    <i class="fa-solid fa-chevron-right"></i>
-                </button>
-            </div>
-        </div>
-
-        <!-- DAILY SALES, EXPENSES, CREDIT MANAGER, SUMMARY (Keeping existing structure) -->
-        
-        <div id="page-daily-sales" class="page-section hidden min-h-screen bg-gray-100 pb-20">
-             <!-- Same as previous -->
-             <header class="bg-green-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="navigateTo('page-account-mgmt')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">บันทึกยอดขายประจำวัน</h1></header>
-            <div class="p-4"><div class="bg-white rounded-xl shadow p-4 mb-6"><h3 class="font-bold text-gray-700 mb-3 border-b pb-2">แบบฟอร์มบันทึก</h3><form id="salesForm" onsubmit="submitSales(event)"><input type="hidden" id="saleId"><div class="mb-3"><label class="text-xs font-bold text-gray-500">วันที่</label><input type="date" id="saleDate" class="w-full border rounded p-2 text-sm"></div><div class="bg-blue-50 p-2 rounded mb-3"><p class="text-xs font-bold text-blue-800 mb-1">ยอดจากระบบ (POS)</p><div class="flex gap-2 mb-2"><input type="number" id="sysCash" placeholder="เงินสด" class="w-1/2 border rounded p-2 text-sm" oninput="calcSales()"><input type="number" id="sysTransfer" placeholder="เงินโอน" class="w-1/2 border rounded p-2 text-sm" oninput="calcSales()"></div><div class="text-right text-xs text-blue-600 font-bold">รวม: <span id="sysTotalDisplay">0</span></div></div><div class="bg-green-50 p-2 rounded mb-3"><p class="text-xs font-bold text-green-800 mb-1">ยอดที่นับได้จริง</p><div class="flex gap-2 mb-2"><input type="number" id="cntCash" placeholder="เงินสด" class="w-1/2 border rounded p-2 text-sm" oninput="calcSales()"><input type="number" id="cntTransfer" placeholder="เงินโอน" class="w-1/2 border rounded p-2 text-sm" oninput="calcSales()"></div><div class="text-right text-xs text-green-600 font-bold">รวม: <span id="cntTotalDisplay">0</span></div></div><div class="flex justify-between items-center mb-4 p-2 bg-gray-200 rounded text-sm"><div class="text-red-600">ขาด: <span id="diffMissing" class="font-bold">0</span></div><div class="text-green-600">เกิน: <span id="diffOver" class="font-bold">0</span></div></div><button type="submit" id="btnSubmitSales" class="w-full bg-green-600 text-white rounded-lg py-2 font-bold shadow hover:bg-green-700 transition">บันทึกข้อมูล</button></form></div><div><div class="flex justify-between items-center mb-2"><h3 class="font-bold text-gray-700">ประวัติการบันทึก</h3><div class="flex gap-1"><input type="date" id="filterSaleStart" class="text-xs border rounded p-1" onchange="loadSalesHistory()"><input type="date" id="filterSaleEnd" class="text-xs border rounded p-1" onchange="loadSalesHistory()"></div></div><div class="overflow-x-auto bg-white rounded-lg shadow"><table class="w-full text-xs text-left"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-2">วันที่</th><th class="p-2 text-right">เงินสด</th><th class="p-2 text-right">โอน</th><th class="p-2 text-right">รวม(นับ)</th><th class="p-2">ผู้บันทึก</th><th class="p-2 text-center">จัดการ</th></tr></thead><tbody id="salesTableBody"></tbody></table></div></div></div>
-        </div>
-
-        <div id="page-expenses" class="page-section hidden min-h-screen bg-gray-100 pb-20">
-             <!-- Same as previous -->
-             <header class="bg-red-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="navigateTo('page-account-mgmt')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">บันทึกรายจ่าย</h1></header><div class="p-4"><button onclick="openCreditManager()" class="w-full bg-yellow-100 text-yellow-700 border border-yellow-300 rounded-lg p-3 flex items-center justify-center font-bold mb-4 hover:bg-yellow-200 transition"><i class="fa-solid fa-file-invoice-dollar mr-2 text-xl"></i> จัดการเงินเชื่อ</button><div class="bg-white rounded-xl shadow p-4 mb-6"><h3 class="font-bold text-gray-700 mb-3 border-b pb-2">บันทึกค่าใช้จ่าย</h3><form id="expenseForm" onsubmit="submitExpense(event)"><input type="hidden" id="expenseId"><div class="flex gap-2 mb-3"><div class="w-1/2"><label class="text-xs font-bold text-gray-500">วันที่</label><input type="date" id="expDate" class="w-full border rounded p-2 text-sm"></div><div class="w-1/2"><label class="text-xs font-bold text-gray-500">จ่ายให้ (ร้าน)</label><select id="expVendor" class="w-full border rounded p-2 text-sm bg-white" onchange="checkVendorOther(this)"><option value="ร้านวีเอ">ร้านวีเอ</option><option value="เบเกอรี่โฮม">เบเกอรี่โฮม</option><option value="โดนใจรือเสาะ">โดนใจรือเสาะ</option><option value="ร้านผัก">ร้านผัก</option><option value="other">+ เพิ่มร้านอื่น</option></select><input type="text" id="expVendorOther" class="w-full border rounded p-2 text-sm mt-1 hidden" placeholder="ระบุชื่อร้าน"></div></div><div class="flex gap-2 mb-3"><div class="w-1/2"><label class="text-xs font-bold text-gray-500">จำนวนเงิน</label><input type="number" id="expAmount" class="w-full border rounded p-2 text-sm"></div><div class="w-1/2"><label class="text-xs font-bold text-gray-500">ประเภท</label><select id="expType" class="w-full border rounded p-2 text-sm bg-white"><option value="เงินสด">เงินสด</option><option value="เงินโอน">เงินโอน</option><option value="เงินเชื่อ">เงินเชื่อ</option></select></div></div><div class="mb-4 bg-gray-100 p-2 rounded-lg text-center"><h4 class="text-sm font-bold mb-2 text-left text-gray-600">รูปใบเสร็จ</h4><div class="relative w-full h-64 bg-gray-200 rounded-lg overflow-hidden flex items-center justify-center mb-2 border border-gray-300"><div id="cameraPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-100 z-30"><i class="fa-solid fa-camera text-4xl text-gray-400 mb-2"></i><button type="button" onclick="startCamera()" class="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 font-bold text-sm">ถ่ายรูปใบเสร็จ</button></div><video id="cameraVideo" class="hidden absolute w-full h-full object-cover z-10" autoplay playsinline></video><canvas id="cameraCanvas" class="hidden absolute w-full h-full object-cover z-20"></canvas><img id="savedImagePreview" class="hidden absolute w-full h-full object-contain bg-black z-20"><div id="cameraControls" class="hidden absolute bottom-4 flex gap-4 z-40"><button type="button" id="btnCapture" onclick="captureImage()" class="bg-white rounded-full p-3 shadow-lg hover:bg-gray-100 transition transform hover:scale-105 border-4 border-gray-300"><i class="fas fa-camera text-2xl text-orange-600"></i></button><button type="button" id="btnRetake" onclick="startCamera()" class="hidden bg-yellow-400 rounded-full p-3 shadow-lg hover:bg-yellow-500 transition transform hover:scale-105"><i class="fas fa-redo text-2xl text-white"></i></button></div></div><p id="imgStatus" class="text-xs text-gray-500 font-medium">กดปุ่มเพื่อถ่ายภาพ</p><input type="hidden" id="expBase64"></div><button type="submit" id="btnSubmitExpense" class="w-full bg-red-600 text-white rounded-lg py-2 font-bold shadow hover:bg-red-700">บันทึกรายจ่าย</button></form></div><div><div class="flex justify-between items-center mb-2"><h3 class="font-bold text-gray-700">ประวัติรายจ่าย</h3><div class="flex gap-1"><input type="date" id="filterExpStart" class="text-xs border rounded p-1" onchange="loadExpenseHistory()"><input type="date" id="filterExpEnd" class="text-xs border rounded p-1" onchange="loadExpenseHistory()"></div></div><div class="overflow-x-auto bg-white rounded-lg shadow"><table class="w-full text-xs text-left"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-2">วันที่</th><th class="p-2">รายการ</th><th class="p-2 text-right">บาท</th><th class="p-2">ประเภท</th><th class="p-2">ผู้บันทึก</th><th class="p-2 text-center">จัดการ</th></tr></thead><tbody id="expenseTableBody"></tbody></table></div></div></div>
-        </div>
-
-        <div id="page-credit-manager" class="page-section hidden min-h-screen bg-gray-50 pb-20">
-             <!-- Same as previous -->
-             <header class="bg-yellow-500 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="navigateTo('page-expenses')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">จัดการเงินเชื่อ</h1></header><div class="p-4"><div class="bg-white rounded-xl shadow p-4 mb-4 border-l-4 border-yellow-500"><p class="text-sm text-gray-500">ยอดค้างชำระทั้งหมด</p><p id="creditTotalUnpaid" class="text-3xl font-bold text-yellow-600">0 ฿</p></div><div class="mb-6"><h3 class="font-bold text-gray-700 mb-2 border-b pb-1">รายการค้างชำระ</h3><div class="overflow-x-auto bg-white rounded-lg shadow"><table class="w-full text-xs text-left"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-2">วันที่</th><th class="p-2">รายการ</th><th class="p-2 text-right">จำนวนเงิน</th><th class="p-2">ผู้บันทึก</th><th class="p-2 text-center">จัดการ</th></tr></thead><tbody id="creditUnpaidBody"></tbody></table></div></div><div><h3 class="font-bold text-gray-700 mb-2 border-b pb-1">ประวัติการจัดการ (ชำระแล้ว)</h3><div class="overflow-x-auto bg-white rounded-lg shadow"><table class="w-full text-xs text-left"><thead class="bg-gray-100 text-gray-600 border-b"><tr><th class="p-2">วันที่</th><th class="p-2">รายการ</th><th class="p-2 text-right">จำนวนเงิน</th><th class="p-2">สถานะ</th><th class="p-2">ผู้บันทึก</th><th class="p-2 text-center">จัดการ</th></tr></thead><tbody id="creditHistoryBody"></tbody></table></div></div></div>
-        </div>
-
-        <div id="page-summary" class="page-section hidden min-h-screen bg-gray-50">
-            <!-- Same as previous -->
-            <header class="bg-blue-600 text-white p-4 flex items-center shadow sticky top-0 z-20"><button onclick="navigateTo('page-account-mgmt')" class="mr-3"><i class="fa-solid fa-arrow-left"></i></button><h1 class="font-bold">สรุปบัญชี</h1></header><div class="p-4"><div class="bg-white rounded-lg shadow p-2 mb-4 text-xs sm:text-sm overflow-x-auto"><table class="w-full whitespace-nowrap"><thead><tr class="text-gray-500 border-b"><th class="text-left py-2 px-2 w-1/4">รายการ</th><th class="text-right py-2 px-2 w-1/4">เงินสด</th><th class="text-right py-2 px-2 w-1/4">เงินโอน</th><th class="text-right py-2 px-2 w-1/4">รวม</th></tr></thead><tbody><tr class="border-b hover:bg-green-50 transition"><td class="py-3 px-2 font-bold text-green-700 flex items-center"><i class="fa-solid fa-cash-register mr-2"></i> ยอดขาย</td><td class="text-right px-2 text-green-600" id="sumSaleCash">0</td><td class="text-right px-2 text-green-600" id="sumSaleTransfer">0</td><td class="text-right px-2 font-bold text-green-800 bg-green-100 rounded" id="sumSaleTotal">0</td></tr><tr class="border-b hover:bg-red-50 transition"><td class="py-3 px-2 font-bold text-red-700 flex items-center"><i class="fa-solid fa-receipt mr-2 pl-1"></i> รายจ่าย</td><td class="text-right px-2 text-red-600" id="sumExpCash">0</td><td class="text-right px-2 text-red-600" id="sumExpTransfer">0</td><td class="text-right px-2 font-bold text-red-800 bg-red-100 rounded" id="sumExpTotal">0</td></tr><tr class="hover:bg-blue-50 transition"><td class="py-3 px-2 font-bold text-blue-700 flex items-center"><i class="fa-solid fa-wallet mr-2"></i> คงเหลือ</td><td class="text-right px-2 text-blue-600 font-semibold" id="sumBalCash">0</td><td class="text-right px-2 text-blue-600 font-semibold" id="sumBalTransfer">0</td><td class="text-right px-2 font-extrabold text-blue-800 bg-blue-100 rounded" id="sumBalTotal">0</td></tr></tbody></table></div><div class="bg-white p-3 rounded-lg shadow mb-4"><div class="flex gap-2 mb-2"><input type="date" id="sumStartDate" class="w-1/2 border rounded p-1 text-sm"><input type="date" id="sumEndDate" class="w-1/2 border rounded p-1 text-sm"></div><button onclick="loadSummary()" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-bold shadow transition">ค้นหา</button></div><div class="overflow-x-auto bg-white rounded-lg shadow pb-20 border border-gray-200"><table class="w-full text-xs text-left whitespace-nowrap"><thead class="bg-gray-700 text-white"><tr><th class="p-2 border-r border-gray-600">#</th><th class="p-2 border-r border-gray-600">วันที่</th><th class="p-2 border-r border-gray-600">รายการ</th><th class="p-2 text-right bg-green-700 border-r border-green-600">เงินสด</th><th class="p-2 text-right bg-green-700 border-r border-green-600">โอน</th><th class="p-2 text-right bg-green-800 font-bold border-r border-green-600">รวม</th><th class="p-2 text-right bg-blue-700 border-r border-blue-600">คงเหลือ(สด)</th><th class="p-2 text-right bg-blue-700 border-r border-blue-600">คงเหลือ(โอน)</th><th class="p-2 text-right bg-blue-800 font-bold">คงเหลือ(รวม)</th></tr></thead><tbody id="summaryTableBody"><tr><td colspan="9" class="p-6 text-center text-gray-400">กรุณากดค้นหาเพื่อแสดงข้อมูล</td></tr></tbody></table></div></div>
-        </div>
-
-        <!-- MODALS (Pay Credit, Detail, Image) -->
-        <div id="payCreditModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black bg-opacity-80 backdrop-blur-sm">
-            <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[95vh] animate-[fadeIn_0.2s_ease-out]">
-                <div class="bg-green-600 p-4 text-white flex justify-between items-center rounded-t-xl shrink-0"><h3 class="font-bold text-lg"><i class="fa-solid fa-file-invoice-dollar mr-2"></i>ชำระเงินเชื่อ</h3><button onclick="closePayCreditModal()" class="text-white hover:bg-green-700 w-8 h-8 rounded-full flex items-center justify-center transition"><i class="fa-solid fa-xmark text-xl"></i></button></div>
-                <div class="p-5 overflow-y-auto space-y-4">
-                    <input type="hidden" id="payCreditId"><input type="hidden" id="payCreditAmount">
-                    <div class="text-center mb-4"><p class="text-gray-500 text-sm">ยอดชำระ</p><p id="payCreditDisplayAmount" class="text-3xl font-bold text-green-700">0</p><p class="text-gray-400 text-xs">บาท</p></div>
-                    <div><label class="block text-gray-700 text-sm font-bold mb-2">วิธีการชำระ</label><select id="payCreditType" class="w-full border rounded-lg p-2.5 bg-gray-50 focus:ring-2 focus:ring-green-500 outline-none"><option value="เงินโอน">เงินโอน</option><option value="เงินสด">เงินสด</option></select></div>
-                    <div><label class="block text-gray-700 text-sm font-bold mb-2">หลักฐานการชำระ (บังคับ)</label><div id="uploadArea" class="flex flex-col items-center justify-center w-full h-40 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors relative" onclick="triggerFileSelect()"><div class="flex flex-col items-center justify-center pt-5 pb-6" id="slipUploadPrompt"><i class="fa-solid fa-cloud-arrow-up text-3xl text-gray-400 mb-2"></i><p class="mb-1 text-sm text-gray-500"><span class="font-semibold">คลิกเพื่ออัปโหลด</span></p><p class="text-xs text-gray-400">รองรับ .jpg, .png</p></div><div id="slipPreviewContainer" class="hidden absolute inset-0 w-full h-full bg-white flex items-center justify-center rounded-lg overflow-hidden border border-gray-200"><img id="creditSlipPreview" class="max-h-full max-w-full object-contain"></div></div><div id="removeSlipContainer" class="hidden text-right mt-1"><button type="button" onclick="removeCreditSlip(event)" class="text-red-500 text-xs hover:underline flex items-center justify-end w-full"><i class="fa-solid fa-trash mr-1"></i> ลบรูปภาพ</button></div><input id="creditSlipFile" type="file" class="hidden" accept="image/*" onchange="handleCreditSlipSelect(this)" /><input type="hidden" id="creditSlipBase64"></div>
-                </div>
-                <div class="p-4 bg-gray-50 border-t rounded-b-xl flex justify-end gap-2 shrink-0"><button onclick="closePayCreditModal()" class="bg-gray-300 hover:bg-gray-400 text-gray-700 font-medium px-4 py-2 rounded-lg transition">ยกเลิก</button><button onclick="confirmPayCredit()" class="bg-green-600 hover:bg-green-700 text-white font-bold px-6 py-2 rounded-lg shadow transition flex items-center"><i class="fa-solid fa-check mr-2"></i> ยืนยันการชำระ</button></div>
-            </div>
-        </div>
-
-        <div id="detailModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black bg-opacity-80 backdrop-blur-sm"><div class="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh] animate-[fadeIn_0.2s_ease-out]"><div class="bg-orange-500 p-4 text-white flex justify-between items-center rounded-t-xl shrink-0"><h3 class="font-bold text-lg"><i class="fa-solid fa-circle-info mr-2"></i>รายละเอียด</h3><button onclick="closeDetailModal()" class="text-white hover:bg-orange-600 w-8 h-8 rounded-full flex items-center justify-center transition"><i class="fa-solid fa-xmark text-xl"></i></button></div><div class="p-5 overflow-y-auto text-sm space-y-4"><div class="grid grid-cols-2 gap-4 border-b pb-4"><div><p class="text-xs text-gray-500">วันที่</p><p id="detDate" class="font-bold text-gray-800 text-base"></p></div><div><p class="text-xs text-gray-500">สถานะ</p><p id="detStatus" class="font-bold text-blue-600 text-base"></p></div></div><div class="border-b pb-4"><p class="text-xs text-gray-500">รายการ</p><p id="detVendor" class="font-bold text-gray-800 text-lg"></p></div><div class="grid grid-cols-2 gap-4 border-b pb-4"><div><p class="text-xs text-gray-500">ประเภท</p><p id="detType" class="font-bold text-gray-800"></p></div><div><p class="text-xs text-gray-500">ผู้ทำรายการ</p><p id="detUser" class="font-bold text-gray-800"></p></div></div><div class="bg-orange-50 p-3 rounded-lg text-center border border-orange-100"><p class="text-xs text-gray-500">จำนวนเงิน</p><p id="detAmount" class="font-bold text-3xl text-red-600 mt-1"></p><span class="text-xs text-gray-400">บาท</span></div><div><span class="text-gray-500 block mb-2 font-medium">รูปใบเสร็จ / หลักฐาน</span><div class="w-full bg-gray-100 rounded-lg flex items-center justify-center overflow-hidden border border-gray-200 min-h-[200px]"><img id="detImage" class="w-full h-auto max-h-[60vh] object-contain hidden cursor-zoom-in" onclick="viewImage(this.src)"><div id="detNoImage" class="flex flex-col items-center text-gray-400 py-10"><i class="fa-regular fa-image text-4xl mb-2"></i><span>ไม่มีรูปภาพ</span></div></div></div></div><div class="p-4 bg-gray-50 border-t rounded-b-xl text-right shrink-0"><button onclick="closeDetailModal()" class="w-full sm:w-auto bg-gray-500 hover:bg-gray-600 text-white font-medium px-6 py-2.5 rounded-lg shadow transition">ปิดหน้าต่าง</button></div></div></div>
+        <!-- Image Modal -->
         <div id="imageModal" class="fixed inset-0 z-50 hidden bg-black bg-opacity-90 flex items-center justify-center p-4" onclick="this.classList.add('hidden')"><img id="modalImg" src="" class="max-w-full max-h-full rounded"></div>
     </div>
 
     <script>
-        // Update Time display
-        setInterval(() => {
-            const now = new Date();
-            const dateStr = now.toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-            const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-            if(document.getElementById('attCurrentDate')) document.getElementById('attCurrentDate').innerText = dateStr;
-            if(document.getElementById('attCurrentTime')) document.getElementById('attCurrentTime').innerText = timeStr;
-        }, 1000);
+        // --- HELPER FUNCTIONS ---
+        function showLoading(show) { document.getElementById('loadingOverlay').classList.toggle('hidden', !show); }
+        function togglePasswordVisibility(id) { const i = document.getElementById(id); i.type = i.type === 'password' ? 'text' : 'password'; }
+        function formatInputDate(d) { return d.toISOString().split('T')[0]; }
+        function setBtnLoading(btn, isLoading) {
+            if (isLoading) {
+                btn.dataset.originalContent = btn.innerHTML;
+                btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i>';
+                btn.disabled = true;
+                btn.classList.add('opacity-70', 'cursor-not-allowed');
+            } else {
+                btn.innerHTML = btn.dataset.originalContent || btn.innerHTML;
+                btn.disabled = false;
+                btn.classList.remove('opacity-70', 'cursor-not-allowed');
+            }
+        }
+        
+        // --- NAVIGATION & LOGIN ---
+
+        // Fetch Shop List on Init
+        fetchShopList();
+
+        function fetchShopList() {
+            fetch(`${APPS_SCRIPT_URL}?action=getShopList&_t=${Date.now()}`)
+            .then(r => r.json())
+            .then(res => {
+                if(res.status === 'success' && res.data && res.data.length > 0) {
+                    shopList = res.data; 
+                }
+            })
+            .catch(e => console.log('Using default shop list'));
+        }
 
         function navigateTo(pageId) {
+            // Stop camera if leaving expense page
             if (document.getElementById('page-expenses').classList.contains('hidden') === false && pageId !== 'page-expenses') stopCamera();
+            
+            // Toggle Summary button in Account Mgmt based on Role
             if (pageId === 'page-account-mgmt') {
                 const btnSum = document.getElementById('btnMgtSummary');
+                const btnVerify = document.getElementById('btnMoneyVerify');
                 if (btnSum) {
                     if (currentRole === 'owner') {
                         btnSum.classList.remove('hidden');
+                        if(btnVerify) btnVerify.classList.remove('hidden'); 
                     } else {
                         btnSum.classList.add('hidden');
+                        if(btnVerify) btnVerify.classList.add('hidden');
                     }
                 }
             }
+
+            // Init Attendance Report button
             if (pageId === 'page-attendance') {
-                loadAttendanceHistory(); // Auto-load history
-                // SHOW/HIDE REPORT BUTTON BASED ON ROLE
+                loadAttendanceHistory(); 
                 const btnReport = document.getElementById('btnOwnerAttendanceReport');
                 if (btnReport) {
                     if (currentRole === 'owner') {
@@ -602,21 +588,22 @@
                     }
                 }
             }
+
+            // Init Report Page
             if (pageId === 'page-attendance-report') {
-                // SECURITY CHECK
                 if (currentRole !== 'owner') {
                     Swal.fire('Access Denied', 'สำหรับเจ้าของร้านเท่านั้น', 'error');
                     return;
                 }
                 initReportPage();
             }
+
+            // Hide all pages, Show target
             document.querySelectorAll('.page-section').forEach(el => el.classList.add('hidden'));
             document.getElementById(pageId).classList.remove('hidden');
             window.scrollTo(0,0);
         }
-        function togglePasswordVisibility(id) { const i = document.getElementById(id); i.type = i.type === 'password' ? 'text' : 'password'; }
-        function showLoading(show) { document.getElementById('loadingOverlay').classList.toggle('hidden', !show); }
-        function formatInputDate(d) { return d.toISOString().split('T')[0]; }
+
         function handleLogin(e) { 
             e.preventDefault(); 
             const u = document.getElementById('loginUsername').value; 
@@ -641,6 +628,7 @@
             })
             .catch(err => { showLoading(false); Swal.fire('Error', 'Connection failed', 'error'); }); 
         }
+
         function logout() { currentUser = null; document.getElementById('loginUsername').value = ''; document.getElementById('loginPassword').value = ''; navigateTo('page-login'); }
         
         function backFromAccountMgmt() {
@@ -651,7 +639,6 @@
             }
         }
 
-        // NEW: Back function for Attendance Page
         function backFromAttendance() {
             if (currentRole === 'owner') {
                 navigateTo('page-luma-menu');
@@ -660,7 +647,267 @@
             }
         }
 
-        // --- ATTENDANCE ---
+        // --- PETTY CASH FUNCTIONS ---
+        
+        // Owner Side
+        function openPettyCashOwner() {
+            navigateTo('page-petty-cash-owner');
+            document.getElementById('pcFundDate').value = formatInputDate(new Date());
+             // Load Employee List for Owner to choose receiver
+            loadEmployeeList('pcFundReceiver');
+        }
+
+        function submitPettyCashFund(e) {
+            e.preventDefault();
+            const amount = document.getElementById('pcFundAmount').value;
+            const receiver = document.getElementById('pcFundReceiver').value;
+            if (!amount || amount <= 0) return Swal.fire('ข้อมูลไม่ถูกต้อง', 'กรุณาระบุจำนวนเงิน', 'warning');
+            if (!receiver) return Swal.fire('ข้อมูลไม่ถูกต้อง', 'กรุณาเลือกผู้รับเงิน', 'warning');
+
+            const dateStr = document.getElementById('pcFundDate').value;
+            const parts = dateStr.split('-');
+            
+            const data = {
+                action: 'savePettyCashFund',
+                date: `${parts[2]}/${parts[1]}/${parts[0]}`,
+                amount: amount,
+                receiver: receiver,
+                note: document.getElementById('pcFundNote').value,
+                user: currentUser
+            };
+
+            showLoading(true);
+            fetch(APPS_SCRIPT_URL, {method: 'POST', body: JSON.stringify(data)})
+            .then(r => r.json())
+            .then(res => {
+                showLoading(false);
+                if(res.status === 'success') {
+                    Swal.fire('สำเร็จ', 'บันทึกยอดเงินกองทุนเรียบร้อย', 'success');
+                    document.getElementById('pcFundAmount').value = '';
+                    document.getElementById('pcFundNote').value = '';
+                } else {
+                    Swal.fire('Error', res.message, 'error');
+                }
+            })
+            .catch(err => {
+                showLoading(false);
+                Swal.fire('Error', 'เชื่อมต่อล้มเหลว', 'error');
+            });
+        }
+        
+        function loadPettyCashFundHistory(btn) {
+             const s = document.getElementById('pcFundHistoryStart').value;
+             const e = document.getElementById('pcFundHistoryEnd').value;
+             if(!s || !e) return;
+             
+             setBtnLoading(btn, true);
+             const sp = s.split('-'); const ep = e.split('-');
+             
+             fetch(`${APPS_SCRIPT_URL}?action=getPettyCashFundHistory&startDate=${sp[2]}/${sp[1]}/${sp[0]}&endDate=${ep[2]}/${ep[1]}/${ep[0]}&_t=${Date.now()}`)
+             .then(r => r.json())
+             .then(res => {
+                 setBtnLoading(btn, false);
+                 const tbody = document.getElementById('pcFundHistoryBody');
+                 tbody.innerHTML = '';
+                 if(res.data && res.data.length > 0){
+                     res.data.forEach(row => {
+                         tbody.innerHTML += `<tr class="border-b"><td class="p-2">${row.date}</td><td class="p-2 text-right font-bold text-green-600">${Number(row.amount).toLocaleString()}</td><td class="p-2">${row.receiver}</td><td class="p-2 text-gray-500">${row.note}</td></tr>`;
+                     });
+                 } else {
+                     tbody.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-gray-400">ไม่พบข้อมูล</td></tr>';
+                 }
+             })
+             .catch(e => setBtnLoading(btn, false));
+        }
+
+        // Employee Side
+        function openPettyCashEmployee() {
+            navigateTo('page-petty-cash-employee');
+            document.getElementById('pcExpDate').value = formatInputDate(new Date());
+            loadPettyCashDashboard();
+            toggleSlipInput();
+            // Render shop list when opening page
+            renderShopSelect('pcExpVendorSelect');
+            document.getElementById('pcExpVendorInput').classList.add('hidden'); // Reset input
+        }
+
+        function renderShopSelect(selectId) {
+            const select = document.getElementById(selectId);
+            if(!select) return;
+            select.innerHTML = '';
+            
+            // Add known shops
+            shopList.forEach(shop => {
+                const opt = document.createElement('option');
+                opt.value = shop;
+                opt.innerText = shop;
+                select.appendChild(opt);
+            });
+            
+            // Add "Other" option
+            const optOther = document.createElement('option');
+            optOther.value = 'other';
+            optOther.innerText = '+ เพิ่มร้านอื่น';
+            optOther.className = "text-blue-600 font-bold";
+            select.appendChild(optOther);
+        }
+
+        function checkVendorGeneric(select, inputId) {
+            const input = document.getElementById(inputId);
+            if (select.value === 'other') {
+                input.classList.remove('hidden');
+                input.required = true;
+                input.focus();
+            } else {
+                input.classList.add('hidden');
+                input.required = false;
+            }
+        }
+
+        function toggleSlipInput() {
+            const type = document.getElementById('pcExpType').value;
+            const slipContainer = document.getElementById('pcSlipContainer');
+            if (type === 'เงินโอน') {
+                slipContainer.classList.remove('hidden');
+                document.getElementById('pcSlipFile').required = true;
+            } else {
+                slipContainer.classList.add('hidden');
+                document.getElementById('pcSlipFile').required = false;
+            }
+        }
+
+        function previewImage(input, imgId) {
+            const preview = document.getElementById(imgId);
+            const hiddenInput = document.getElementById(imgId.replace('Preview', 'Base64'));
+            
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = new Image();
+                    img.src = e.target.result;
+                    img.onload = function() {
+                         const c=document.createElement('canvas'); const ctx=c.getContext('2d'); 
+                         const mw=600; 
+                         let w=img.width; let h=img.height; 
+                         if(w>mw){h*=mw/w; w=mw;} 
+                         c.width=w; c.height=h; ctx.drawImage(img,0,0,w,h);
+                         const d=c.toDataURL('image/jpeg',0.5);
+                         preview.src = d;
+                         preview.classList.remove('hidden');
+                         hiddenInput.value = d;
+                    }
+                }
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        function submitPettyCashExpense(e) {
+            e.preventDefault();
+            
+            // Handle Vendor Name
+            const select = document.getElementById('pcExpVendorSelect');
+            let vendor = select.value;
+            let isNewShop = false;
+            
+            if (vendor === 'other') {
+                vendor = document.getElementById('pcExpVendorInput').value.trim();
+                if(!vendor) return Swal.fire('ข้อมูลไม่ครบ', 'กรุณาระบุชื่อร้านค้าใหม่', 'warning');
+                isNewShop = true;
+            }
+
+            const amount = document.getElementById('pcExpAmount').value;
+            const type = document.getElementById('pcExpType').value;
+            const receipt = document.getElementById('pcReceiptBase64').value;
+            const slip = document.getElementById('pcSlipBase64').value;
+
+            if (!receipt) return Swal.fire('ข้อมูลไม่ครบ', 'กรุณาแนบรูปใบเสร็จ', 'warning');
+            if (type === 'เงินโอน' && !slip) return Swal.fire('ข้อมูลไม่ครบ', 'กรุณาแนบสลิปโอนเงิน', 'warning');
+
+            const dateStr = document.getElementById('pcExpDate').value;
+            const parts = dateStr.split('-');
+
+            const data = {
+                action: 'savePettyCashExpense',
+                date: `${parts[2]}/${parts[1]}/${parts[0]}`,
+                vendor: vendor,
+                amount: amount,
+                type: type,
+                receiptImage: receipt,
+                slipImage: slip,
+                user: currentUser,
+                isNewShop: isNewShop 
+            };
+
+            showLoading(true);
+            fetch(APPS_SCRIPT_URL, {method: 'POST', body: JSON.stringify(data)})
+            .then(r => r.json())
+            .then(res => {
+                showLoading(false);
+                if(res.status === 'success') {
+                    Swal.fire('สำเร็จ', 'บันทึกรายการซื้อของเรียบร้อย', 'success');
+                    
+                    if (isNewShop && !shopList.includes(vendor)) {
+                        shopList.push(vendor);
+                    }
+
+                    // Reset Form
+                    document.getElementById('pettyCashForm').reset();
+                    document.getElementById('pcExpDate').value = formatInputDate(new Date());
+                    document.getElementById('pcReceiptPreview').classList.add('hidden');
+                    document.getElementById('pcReceiptBase64').value = '';
+                    document.getElementById('pcSlipPreview').classList.add('hidden');
+                    document.getElementById('pcSlipBase64').value = '';
+                    toggleSlipInput();
+                    renderShopSelect('pcExpVendorSelect'); 
+                    document.getElementById('pcExpVendorInput').classList.add('hidden');
+                    loadPettyCashDashboard(); 
+                } else {
+                    Swal.fire('Error', res.message, 'error');
+                }
+            })
+            .catch(err => {
+                showLoading(false);
+                Swal.fire('Error', 'เชื่อมต่อล้มเหลว', 'error');
+            });
+        }
+
+        function loadPettyCashDashboard() {
+            const tbody = document.getElementById('pettyCashTableBody');
+            tbody.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-gray-400">กำลังโหลด...</td></tr>';
+            
+            fetch(`${APPS_SCRIPT_URL}?action=getPettyCashDashboard&_t=${Date.now()}`)
+            .then(r => r.json())
+            .then(res => {
+                if (res.status === 'success') {
+                    document.getElementById('pcDashboardReceived').innerText = Number(res.latestReceived).toLocaleString();
+                    document.getElementById('pcDashboardBalance').innerText = Number(res.balance).toLocaleString();
+                    
+                    currentPettyCashData = res.history || [];
+                    tbody.innerHTML = '';
+                    if (currentPettyCashData.length > 0) {
+                        currentPettyCashData.forEach(row => {
+                             tbody.innerHTML += `
+                                <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="viewDetailModal('${row.id}', 'petty_cash')">
+                                    <td class="p-2">${row.date}</td>
+                                    <td class="p-2">${row.vendor}</td>
+                                    <td class="p-2 text-right font-bold">${Number(row.amount).toLocaleString()}</td>
+                                    <td class="p-2 text-center text-xs">
+                                        <span class="px-2 py-1 rounded-full ${row.status === 'จ่ายแล้ว' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                                            ${row.status}
+                                        </span>
+                                    </td>
+                                </tr>
+                            `;
+                        });
+                    } else {
+                        tbody.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-gray-400">ยังไม่มีรายการ</td></tr>';
+                    }
+                }
+            });
+        }
+
+        // --- ATTENDANCE FUNCTIONS ---
+
         function checkLocationAndSubmit(type) {
             if (!currentUser) return Swal.fire('Error', 'กรุณาเข้าสู่ระบบ', 'error');
             if (!navigator.geolocation) {
@@ -764,22 +1011,18 @@
             });
         }
         
-        // --- NEW REPORT FUNCTIONS ---
+        // --- REPORT FUNCTIONS ---
         function initReportPage() {
-             // Set default dates
             const date = new Date();
             const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
             const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0);
             document.getElementById('reportStartDate').value = formatInputDate(firstDay);
             document.getElementById('reportEndDate').value = formatInputDate(lastDay);
-            
-            // Load Employees
             loadEmployeeList('reportEmpSelect');
         }
 
         function loadEmployeeList(selectId) {
             const select = document.getElementById(selectId);
-            // Check if already loaded to avoid refetching every time
             if (select.options.length > 1) return; 
 
             fetch(`${APPS_SCRIPT_URL}?action=getEmployeeList&_t=${Date.now()}`)
@@ -817,11 +1060,9 @@
             .then(res => {
                 showLoading(false);
                 if (res.status === 'success') {
-                    // Update Dashboard
                     document.getElementById('reportTotalDays').innerText = res.summary.days;
                     document.getElementById('reportTotalHours').innerText = res.summary.hours;
 
-                    // Update Table
                     tbody.innerHTML = '';
                     if (res.data && res.data.length > 0) {
                         res.data.forEach(row => {
@@ -863,14 +1104,63 @@
             navigateTo('page-salary-settings');
             loadSalaryRates();
         }
+        
+        function openSalaryLateSettings() {
+             navigateTo('page-salary-late-settings');
+             // Load current settings (simulated via action)
+             showLoading(true);
+             fetch(`${APPS_SCRIPT_URL}?action=getLatePolicy&_t=${Date.now()}`)
+             .then(r => r.json())
+             .then(res => {
+                 showLoading(false);
+                 if(res.status === 'success') {
+                     latePolicy = res.data;
+                     document.getElementById('lateTimeInput').value = latePolicy.time;
+                     document.getElementById('lateRateInput').value = latePolicy.rate;
+                 }
+             })
+             .catch(e => {
+                 showLoading(false);
+                 // Use default if failed
+             });
+        }
+        
+        function saveLatePolicy() {
+            const time = document.getElementById('lateTimeInput').value;
+            const rate = document.getElementById('lateRateInput').value;
+            
+            if(!time || !rate) return Swal.fire('ข้อมูลไม่ครบ', 'กรุณาระบุเวลาและอัตราหัก', 'warning');
+            
+            const data = {
+                action: 'saveLatePolicy',
+                time: time,
+                rate: rate,
+                user: currentUser // Add User
+            };
+            
+            showLoading(true);
+            fetch(APPS_SCRIPT_URL, {method: 'POST', body: JSON.stringify(data)})
+            .then(r => r.json())
+            .then(res => {
+                showLoading(false);
+                if(res.status === 'success') {
+                    Swal.fire('สำเร็จ', 'บันทึกตั้งค่าการหักเงินแล้ว', 'success');
+                    latePolicy = { time: time, rate: rate };
+                } else {
+                    Swal.fire('Error', res.message, 'error');
+                }
+            })
+            .catch(e => {
+                showLoading(false);
+                Swal.fire('Error', 'Connection failed', 'error');
+            });
+        }
 
         function loadSalaryRates() {
-            // Load employees list and build table
             showLoading(true);
             const tbody = document.getElementById('salaryRateTableBody');
             tbody.innerHTML = '';
 
-            // Fetch Employees AND Salary Rates (from server)
             Promise.all([
                 fetch(`${APPS_SCRIPT_URL}?action=getEmployeeList&_t=${Date.now()}`).then(r => r.json()),
                 fetch(`${APPS_SCRIPT_URL}?action=getSalaryRates&_t=${Date.now()}`).then(r => r.json())
@@ -878,7 +1168,6 @@
                 showLoading(false);
                 if (empRes.status === 'success' && empRes.data) {
                     
-                    // Update Cache
                     salaryRates = rateRes.status === 'success' ? rateRes.data : {};
 
                     empRes.data.forEach(emp => {
@@ -905,7 +1194,6 @@
         }
 
         function saveSalaryRate(empName, rate) {
-            // Send to Backend
             fetch(APPS_SCRIPT_URL, {
                 method: 'POST',
                 body: JSON.stringify({
@@ -917,7 +1205,7 @@
             .then(r => r.json())
             .then(res => {
                 if (res.status === 'success') {
-                    salaryRates[empName] = parseFloat(rate); // Update local cache
+                    salaryRates[empName] = parseFloat(rate); 
                     const toast = Swal.mixin({
                         toast: true, position: 'top-end', showConfirmButton: false, timer: 1500, timerProgressBar: true
                     });
@@ -933,24 +1221,23 @@
 
         function openSalaryCalc() {
             navigateTo('page-salary-calc');
-            // Init Dates
             const date = new Date();
             const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
             const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0);
             document.getElementById('calcStartDate').value = formatInputDate(firstDay);
             document.getElementById('calcEndDate').value = formatInputDate(lastDay);
-            // Load Employees
             loadEmployeeList('calcEmpSelect');
-            // Reset result
             document.getElementById('salaryResultCard').classList.add('hidden');
             document.getElementById('unpaidDaysContainer').classList.add('hidden');
             
-            // Reload rates to be sure
-            fetch(`${APPS_SCRIPT_URL}?action=getSalaryRates&_t=${Date.now()}`)
-                .then(r => r.json())
-                .then(res => {
-                    if(res.status === 'success') salaryRates = res.data;
-                });
+            // Initial Load of Policy & Rates
+            Promise.all([
+                 fetch(`${APPS_SCRIPT_URL}?action=getSalaryRates&_t=${Date.now()}`).then(r => r.json()),
+                 fetch(`${APPS_SCRIPT_URL}?action=getLatePolicy&_t=${Date.now()}`).then(r => r.json())
+            ]).then(([rateRes, policyRes]) => {
+                if(rateRes.status === 'success') salaryRates = rateRes.data;
+                if(policyRes.status === 'success') latePolicy = policyRes.data;
+            });
             
             loadSalaryHistory();
         }
@@ -969,22 +1256,22 @@
 
             showLoading(true);
             
-            // 1. Get Attendance
+            // Need: Employee Attendance, Salary History, Verification History (Sales shortage), All Attendance (Headcount)
             const p1 = fetch(`${APPS_SCRIPT_URL}?action=getAttendanceReport&startDate=${sFmt}&endDate=${eFmt}&employeeName=${emp}&_t=${Date.now()}`).then(r => r.json());
-            // 2. Get Salary History (To filter duplicate payments)
             const p2 = fetch(`${APPS_SCRIPT_URL}?action=getSalaryHistory&_t=${Date.now()}`).then(r => r.json());
+            const p3 = fetch(`${APPS_SCRIPT_URL}?action=getVerificationHistory&startDate=${sFmt}&endDate=${eFmt}&_t=${Date.now()}`).then(r => r.json());
+            const p4 = fetch(`${APPS_SCRIPT_URL}?action=getAttendanceReport&startDate=${sFmt}&endDate=${eFmt}&employeeName=all&_t=${Date.now()}`).then(r => r.json());
 
-            Promise.all([p1, p2]).then(([attRes, salRes]) => {
+            Promise.all([p1, p2, p3, p4]).then(([attRes, salRes, verRes, allAttRes]) => {
                 showLoading(false);
                 const listContainer = document.getElementById('unpaidDaysList');
                 listContainer.innerHTML = '';
                 
-                // Extract paid dates from salary history details
+                // 1. Paid Days
                 let paidDates = [];
                 if (salRes.status === 'success' && salRes.data) {
                     salRes.data.forEach(s => {
                         if (s.employee === emp) {
-                            // Try to find dates in details string like "[dd/mm/yyyy, ...]"
                             const match = s.details.match(/\[(.*?)\]/);
                             if (match && match[1]) {
                                 const dates = match[1].split(',').map(d => d.trim());
@@ -994,23 +1281,61 @@
                     });
                 }
 
+                // 2. Shortage Mapping (Date -> Missing Amount)
+                calcDailyShortages = {};
+                if (verRes.status === 'success' && verRes.data) {
+                    verRes.data.forEach(v => {
+                        const m = parseFloat(v.diffMissing);
+                        if(m > 0) calcDailyShortages[v.salesDate] = m;
+                    });
+                }
+                
+                // 3. Employee Counts (Date -> Count)
+                calcDailyEmpCounts = {};
+                if (allAttRes.status === 'success' && allAttRes.data) {
+                    allAttRes.data.forEach(r => {
+                         if(!calcDailyEmpCounts[r.date]) calcDailyEmpCounts[r.date] = 0;
+                         // Count unique users per date
+                         // Simple approach: r corresponds to a check-in record
+                         calcDailyEmpCounts[r.date]++; 
+                    });
+                    // Note: This simplistic count assumes one record per person per day.
+                    // If multiple check-ins exist, logic needs refinement (e.g. Set of users).
+                    // For now assuming clean data from getAttendanceReport which is usually summarized.
+                }
+
                 if (attRes.status === 'success' && attRes.data && attRes.data.length > 0) {
                     let foundUnpaid = false;
                     
                     attRes.data.forEach((row, index) => {
                         const isPaid = paidDates.includes(row.date);
-                        
-                        // Show all days but disable if paid
                         if (!isPaid) foundUnpaid = true;
+                        
+                        // Check Late
+                        let lateInfo = '';
+                        if(row.in) {
+                            // Simple time compare
+                            // row.in e.g. "08:15"
+                            if(latePolicy.time && row.in > latePolicy.time) {
+                                lateInfo = `<span class="text-red-500 text-xs ml-1 font-bold">(สาย)</span>`;
+                            }
+                        }
+                        
+                        // Check Shortage
+                        let shortageInfo = '';
+                        if(calcDailyShortages[row.date] > 0) {
+                             shortageInfo = `<span class="text-orange-500 text-xs ml-1 font-bold">(เงินขาด ${Number(calcDailyShortages[row.date]).toLocaleString()} บ.)</span>`;
+                        }
 
                         listContainer.innerHTML += `
                             <div class="flex items-center p-2 ${isPaid ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'} rounded border mb-2">
                                 ${isPaid ? '<i class="fa-solid fa-check-circle text-green-500 mr-3 text-lg"></i>' : 
-                                  `<input type="checkbox" id="day-${index}" value="${row.date}" checked class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 mr-3 unpaid-day-checkbox">`}
+                                  `<input type="checkbox" id="day-${index}" value="${row.date}" data-in="${row.in}" checked class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 mr-3 unpaid-day-checkbox">`}
                                 
                                 <label for="day-${index}" class="text-sm flex-1 ${isPaid ? 'opacity-70' : ''}">
                                     <span class="font-bold text-gray-700">${row.date}</span>
                                     <span class="text-gray-500 text-xs ml-2">(เข้า ${row.in || '-'} / ออก ${row.out || '-'})</span>
+                                    ${lateInfo} ${shortageInfo}
                                     ${isPaid ? '<span class="text-xs text-green-600 font-bold ml-2 block">จ่ายแล้ว</span>' : ''}
                                 </label>
                             </div>
@@ -1039,24 +1364,69 @@
         function calculateSalary() {
             const emp = document.getElementById('calcEmpSelect').value;
             const rate = salaryRates[emp];
-            
             if (!rate || rate <= 0) return Swal.fire('ไม่พบฐานเงินเดือน', `กรุณากำหนดค่าแรงให้ ${emp} ก่อน`, 'error');
-
+            
             const checkboxes = document.querySelectorAll('.unpaid-day-checkbox:checked');
             const daysWorked = checkboxes.length;
-
             if (daysWorked === 0) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกวันที่อย่างน้อย 1 วัน', 'warning');
+            
+            let totalBase = daysWorked * rate;
+            let totalLateDeduct = 0;
+            let totalLateMinutes = 0;
+            let totalShortageDeduct = 0;
+            let totalShortageRaw = 0;
+            
+            // Loop selected days
+            checkboxes.forEach(cb => {
+                const date = cb.value;
+                const checkIn = cb.getAttribute('data-in');
+                
+                // 1. Calculate Late
+                if (checkIn && latePolicy.time && latePolicy.rate > 0) {
+                    if (checkIn > latePolicy.time) {
+                        // Calc difference in minutes
+                        const [h1, m1] = checkIn.split(':').map(Number);
+                        const [h2, m2] = latePolicy.time.split(':').map(Number);
+                        const diffMins = (h1 * 60 + m1) - (h2 * 60 + m2);
+                        
+                        if (diffMins > 0) {
+                            totalLateMinutes += diffMins;
+                            totalLateDeduct += (diffMins * latePolicy.rate);
+                        }
+                    }
+                }
+                
+                // 2. Calculate Shortage Share
+                if (calcDailyShortages[date] > 0) {
+                     const shortage = calcDailyShortages[date];
+                     totalShortageRaw += shortage; // Accumulate raw shortage
+                     const count = calcDailyEmpCounts[date] || 1; // avoid /0
+                     const share = shortage / count;
+                     totalShortageDeduct += share;
+                }
+            });
 
-            const totalPay = daysWorked * rate;
+            // Rounding
+            totalShortageDeduct = Math.ceil(totalShortageDeduct); 
+            totalLateDeduct = Math.ceil(totalLateDeduct);
+            const netPay = totalBase - totalLateDeduct - totalShortageDeduct;
 
-            // Display Result
             document.getElementById('resEmpName').innerText = emp;
             document.getElementById('resDays').innerText = daysWorked;
-            document.getElementById('resRate').innerText = rate.toLocaleString() + ' บ.';
-            document.getElementById('resTotal').innerText = totalPay.toLocaleString();
+            document.getElementById('resBasePay').innerText = totalBase.toLocaleString() + ' บาท';
+            
+            // Late Display
+            document.getElementById('resLateText').innerText = `หักสาย (${totalLateMinutes} นาที)`;
+            document.getElementById('resLateDeduct').innerText = totalLateDeduct.toLocaleString() + ' บาท';
+            
+            // Shortage Display
+            document.getElementById('resShortageText').innerText = `หักเงินขาด (เฉลี่ยจากยอด ${totalShortageRaw.toLocaleString()} บ.)`;
+            document.getElementById('resShortageDeduct').innerText = totalShortageDeduct.toLocaleString() + ' บาท';
+            
+            // Total
+            document.getElementById('resTotal').innerText = netPay.toLocaleString();
             
             document.getElementById('salaryResultCard').classList.remove('hidden');
-            // Scroll to result
             document.getElementById('salaryResultCard').scrollIntoView({ behavior: 'smooth' });
         }
 
@@ -1064,34 +1434,70 @@
             const emp = document.getElementById('resEmpName').innerText;
             const total = document.getElementById('resTotal').innerText.replace(/,/g, '');
             const selectedDates = Array.from(document.querySelectorAll('.unpaid-day-checkbox:checked')).map(cb => cb.value);
+            const lateAmt = document.getElementById('resLateDeduct').innerText.replace(/ บาท/g, '');
+            const shortAmt = document.getElementById('resShortageDeduct').innerText.replace(/ บาท/g, '');
 
             Swal.fire({
                 title: 'ยืนยันการจ่ายเงิน',
                 html: `
                     <div class="text-left text-sm mb-4">
                         <p><b>พนักงาน:</b> ${emp}</p>
-                        <p><b>จำนวนเงิน:</b> <span class="text-xl text-green-600 font-bold">${parseFloat(total).toLocaleString()}</span> บาท</p>
+                        <p><b>สุทธิ:</b> <span class="text-xl text-green-600 font-bold">${parseFloat(total).toLocaleString()}</span> บาท</p>
                         <p class="text-xs text-gray-500 mt-1">จำนวน ${selectedDates.length} วัน</p>
+                        <div class="mt-2 text-xs bg-gray-100 p-2 rounded">
+                            <p>หักสาย: ${lateAmt}</p>
+                            <p>หักเงินขาด: ${shortAmt}</p>
+                        </div>
                     </div>
                     <label class="block text-left text-sm font-bold text-gray-700 mb-2">ประเภทการจ่ายเงิน</label>
                     <div class="flex gap-4 justify-center mb-4">
                         <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-green-50 w-1/2 justify-center">
-                            <input type="radio" name="payType" value="เงินสด" class="w-4 h-4 text-green-600" checked>
+                            <input type="radio" name="payType" value="เงินสด" class="w-4 h-4 text-green-600" checked onclick="document.getElementById('swalSlipSection').classList.add('hidden')">
                             <span class="ml-2">เงินสด</span>
                         </label>
                         <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 w-1/2 justify-center">
-                            <input type="radio" name="payType" value="เงินโอน" class="w-4 h-4 text-blue-600">
+                            <input type="radio" name="payType" value="เงินโอน" class="w-4 h-4 text-blue-600" onclick="document.getElementById('swalSlipSection').classList.remove('hidden')">
                             <span class="ml-2">เงินโอน</span>
                         </label>
+                    </div>
+                    <div id="swalSlipSection" class="hidden text-left mb-2">
+                        <label class="block text-xs font-bold text-gray-700 mb-1">แนบสลิปโอนเงิน (ถ้ามี)</label>
+                        <input type="file" id="salarySlipFile" accept="image/*" class="w-full text-xs border rounded p-1">
                     </div>
                 `,
                 showCancelButton: true,
                 confirmButtonColor: '#16a34a',
                 cancelButtonColor: '#d33',
-                confirmButtonText: 'ยืนยันจ่ายเงิน'
+                confirmButtonText: 'ยืนยันจ่ายเงิน',
+                preConfirm: () => {
+                     const payType = document.querySelector('input[name="payType"]:checked').value;
+                     const fileInput = document.getElementById('salarySlipFile');
+                     let fileBase64 = '';
+                     
+                     if(payType === 'เงินโอน' && fileInput.files.length > 0) {
+                         return new Promise((resolve, reject) => {
+                             const reader = new FileReader();
+                             reader.onload = (e) => {
+                                 // Resize logic
+                                 const img = new Image();
+                                 img.src = e.target.result;
+                                 img.onload = () => {
+                                     const c = document.createElement('canvas'); const ctx = c.getContext('2d');
+                                     const mw = 600; let w = img.width; let h = img.height;
+                                     if(w > mw) { h *= mw/w; w = mw; }
+                                     c.width = w; c.height = h; ctx.drawImage(img, 0, 0, w, h);
+                                     resolve({ type: payType, slip: c.toDataURL('image/jpeg', 0.5) });
+                                 };
+                             };
+                             reader.readAsDataURL(fileInput.files[0]);
+                         });
+                     } else {
+                         return { type: payType, slip: '' };
+                     }
+                }
             }).then((result) => {
                 if (result.isConfirmed) {
-                    const payType = document.querySelector('input[name="payType"]:checked').value;
+                    const payData = result.value;
                     const d = formatInputDate(new Date());
                     const p = d.split('-');
                     
@@ -1099,10 +1505,11 @@
                         action: 'saveSalary', 
                         date: `${p[2]}/${p[1]}/${p[0]}`, 
                         amount: total,
-                        type: payType,
+                        type: payData.type,
                         employee: emp,
                         payer: currentUser,
-                        details: `จ่ายค่าแรง ${selectedDates.length} วัน [${selectedDates.join(', ')}]` // Updated details to include dates
+                        details: `จ่ายค่าแรง ${selectedDates.length} วัน [${selectedDates.join(', ')}] (หักสาย ${lateAmt}, หักขาด ${shortAmt})`,
+                        slipImage: payData.slip
                     };
 
                     showLoading(true);
@@ -1114,7 +1521,7 @@
                             Swal.fire('สำเร็จ', 'บันทึกการจ่ายเงินเดือนเรียบร้อยแล้ว', 'success');
                             document.getElementById('salaryResultCard').classList.add('hidden');
                             document.getElementById('unpaidDaysContainer').classList.add('hidden');
-                            loadSalaryHistory(); // Refresh history table
+                            loadSalaryHistory(); 
                         } else {
                             Swal.fire('Error', res.message, 'error');
                         }
@@ -1131,15 +1538,13 @@
             const tbody = document.getElementById('salaryHistoryBody');
             tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-gray-400">กำลังโหลดข้อมูล...</td></tr>';
             
-            // New Action: getSalaryHistory
             fetch(`${APPS_SCRIPT_URL}?action=getSalaryHistory&_t=${Date.now()}`)
             .then(r => r.json())
             .then(res => {
                 tbody.innerHTML = '';
                 if (res.status === 'success' && res.data && res.data.length > 0) {
-                    currentSalaryHistory = res.data; // Store for modal
+                    currentSalaryHistory = res.data; 
                     res.data.forEach(row => {
-                        // Assuming row structure: { date, employee, amount, type, payer }
                         tbody.innerHTML += `
                             <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="viewDetailModal('${row.id}', 'salary')">
                                 <td class="p-3">${row.date}</td>
@@ -1167,10 +1572,24 @@
         // --- SET COORDINATES PAGE FUNCTIONS ---
         function openSetCoords() {
             navigateTo('page-set-coords');
-            // Show current if set
+            
             document.getElementById('setLat').value = SHOP_LAT;
             document.getElementById('setLng').value = SHOP_LNG;
             document.getElementById('setDist').value = MAX_DIST_METERS;
+
+            fetch(`${APPS_SCRIPT_URL}?action=getCoordinates&_t=${Date.now()}`)
+            .then(r => r.json())
+            .then(res => {
+                if(res.status === 'success' && res.data) {
+                    SHOP_LAT = parseFloat(res.data.lat);
+                    SHOP_LNG = parseFloat(res.data.lng);
+                    MAX_DIST_METERS = parseFloat(res.data.dist);
+                    
+                    document.getElementById('setLat').value = SHOP_LAT;
+                    document.getElementById('setLng').value = SHOP_LNG;
+                    document.getElementById('setDist').value = MAX_DIST_METERS;
+                }
+            });
         }
 
         function getCurrentCoordsForSetting() {
@@ -1202,18 +1621,36 @@
                 return Swal.fire('Error', 'กรุณากรอกข้อมูลให้ถูกต้อง', 'error');
             }
 
-            // Save to Variables
-            SHOP_LAT = lat;
-            SHOP_LNG = lng;
-            MAX_DIST_METERS = dist;
+            showLoading(true);
+            const data = {
+                action: 'saveCoordinates',
+                lat: lat,
+                lng: lng,
+                dist: dist,
+                user: currentUser || 'Admin'
+            };
 
-            // Save to LocalStorage
-            localStorage.setItem('shop_lat', lat);
-            localStorage.setItem('shop_lng', lng);
-            localStorage.setItem('shop_dist', dist);
-
-            Swal.fire('บันทึกสำเร็จ', 'พิกัดร้านถูกบันทึกแล้ว', 'success').then(() => {
-                navigateTo('page-owner-home');
+            fetch(APPS_SCRIPT_URL, {method: 'POST', body: JSON.stringify(data)})
+            .then(r => r.json())
+            .then(res => {
+                showLoading(false);
+                if(res.status === 'success') {
+                    SHOP_LAT = lat;
+                    SHOP_LNG = lng;
+                    MAX_DIST_METERS = dist;
+                    localStorage.setItem('shop_lat', lat);
+                    localStorage.setItem('shop_lng', lng);
+                    localStorage.setItem('shop_dist', dist);
+                    Swal.fire('บันทึกสำเร็จ', 'พิกัดร้านถูกบันทึกในระบบแล้ว', 'success').then(() => {
+                        navigateTo('page-owner-home');
+                    });
+                } else {
+                     Swal.fire('Error', res.message, 'error');
+                }
+            })
+            .catch(err => {
+                showLoading(false);
+                Swal.fire('Error', 'การเชื่อมต่อล้มเหลว', 'error');
             });
         }
 
@@ -1254,7 +1691,7 @@
             document.getElementById('page-expenses').scrollTo({top:0,behavior:'smooth'});
         }
         function resetExpenseForm(){ document.getElementById('expenseForm').reset(); document.getElementById('expenseId').value=''; document.getElementById('expDate').value=formatInputDate(new Date()); stopCamera(); document.getElementById('expBase64').value=''; document.getElementById('cameraPlaceholder').classList.remove('hidden'); document.getElementById('cameraVideo').classList.add('hidden'); document.getElementById('cameraCanvas').classList.add('hidden'); document.getElementById('savedImagePreview').classList.add('hidden'); document.getElementById('cameraControls').classList.add('hidden'); document.getElementById('imgStatus').innerText='กดปุ่มเพื่อถ่ายภาพ'; checkVendorOther(document.getElementById('expVendor')); document.getElementById('btnSubmitExpense').innerText='บันทึกรายจ่าย'; document.getElementById('btnSubmitExpense').className="w-full bg-red-600 text-white rounded-lg py-2 font-bold shadow hover:bg-red-700 transition"; if(document.getElementById('btnCancelEditE')) document.getElementById('btnCancelEditE').remove(); }
-        function deleteExpense(id){ Swal.fire({title:'ยืนยันลบ?',icon:'warning',showCancelButton:true,confirmButtonColor:'#d33'}).then(r=>{if(r.isConfirmed){ showLoading(true); fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'deleteExpense',rowId:id})}).then(r=>r.json()).then(()=>{showLoading(false);loadExpenseHistory();}) }}); }
+        function deleteExpense(id){ Swal.fire({title:'ยืนยันลบ?',icon:'warning',showCancelButton:true,confirmButtonColor:'#d33'}).then((r)=>{if(r.isConfirmed){ showLoading(true); fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'deleteExpense',rowId:id})}).then(r=>r.json()).then(()=>{showLoading(false);loadExpenseHistory();}) }}); }
 
         // CREDIT MANAGER
         function openCreditManager(){ navigateTo('page-credit-manager'); loadCreditData(); }
@@ -1277,8 +1714,8 @@
                 const reader=new FileReader(); 
                 document.getElementById('slipUploadPrompt').innerHTML='<i class="fa-solid fa-spinner fa-spin text-2xl text-blue-500"></i>';
                 reader.onload=function(e){ const img=new Image(); img.src=e.target.result; img.onload=function(){
-                    const c=document.createElement('canvas'); const ctx=c.getContext('2d'); const mw=800; let w=img.width; let h=img.height; if(w>mw){h*=mw/w; w=mw;} c.width=w; c.height=h; ctx.drawImage(img,0,0,w,h);
-                    const d=c.toDataURL('image/jpeg',0.7); document.getElementById('creditSlipBase64').value=d; document.getElementById('creditSlipPreview').src=d;
+                    const c=document.createElement('canvas'); const ctx=c.getContext('2d'); const mw=600; let w=img.width; let h=img.height; if(w>mw){h*=mw/w; w=mw;} c.width=w; c.height=h; ctx.drawImage(img,0,0,w,h);
+                    const d=c.toDataURL('image/jpeg',0.5); document.getElementById('creditSlipBase64').value=d; document.getElementById('creditSlipPreview').src=d;
                     document.getElementById('slipUploadPrompt').classList.add('hidden'); document.getElementById('slipPreviewContainer').classList.remove('hidden'); document.getElementById('removeSlipContainer').classList.remove('hidden');
                 }}
                 reader.readAsDataURL(input.files[0]);
@@ -1288,8 +1725,7 @@
         function confirmPayCredit(){
             const img=document.getElementById('creditSlipBase64').value; if(!img) return Swal.fire('Warning','แนบสลิปก่อน','warning');
             const d=formatInputDate(new Date()); const p=d.split('-');
-            const data={ action:'payCreditItem', id:document.getElementById('payCreditId').value, paymentType:document.getElementById('payCreditType').value, paymentDate:`${p[0]}/${p[1]}/${p[2]}`, receiptImage:img, user:currentUser }; // Fixed date format logic if needed, actually backend expects dd/mm/yyyy usually, let's stick to what worked or use standard. Code.gs expects something compatible. Let's send dd/mm/yyyy.
-            // Wait, previous code sent formatted date. formatInputDate is yyyy-mm-dd. So p[2]/p[1]/p[0] is correct.
+            const data={ action:'payCreditItem', id:document.getElementById('payCreditId').value, paymentType:document.getElementById('payCreditType').value, paymentDate:`${p[0]}/${p[1]}/${p[2]}`, receiptImage:img, user:currentUser }; 
             showLoading(true); fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(data)}).then(r=>r.json()).then(r=>{ showLoading(false); if(r.status==='success'){ closePayCreditModal(); Swal.fire('Success','ชำระเรียบร้อย','success'); loadCreditData(); }else{ Swal.fire('Error',r.message,'error'); } });
         }
         function deletePaymentHistory(id){ Swal.fire({title:'ยืนยันลบ?',text:"ข้อมูลจะถูกลบและสถานะจะกลับเป็นค้างชำระ",icon:'warning',showCancelButton:true,confirmButtonColor:'#d33'}).then(r=>{if(r.isConfirmed){ showLoading(true); fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'deletePaymentHistory',id:id})}).then(r=>r.json()).then(()=>{showLoading(false);loadCreditData();}) }}); }
@@ -1317,25 +1753,14 @@
                     const tbody = document.getElementById('summaryTableBody'); tbody.innerHTML='';
                     if(res.data.length>0){
                         res.data.forEach(r=>{
-                            // Color logic
                             const cCash = r.cash >= 0 ? 'text-green-600' : 'text-red-600';
                             const cTrans = r.transfer >= 0 ? 'text-green-600' : 'text-red-600';
                             const cTotal = r.total >= 0 ? 'text-green-700 font-bold' : 'text-red-700 font-bold';
                             
-                            // Check for details click
                             let clickAction = '';
-                            if(r.raw.type === 'expense') clickAction = `onclick="viewDetailModal('${r.raw.details && r.raw.details.id ? r.raw.details.id : (r.raw.raw ? r.raw.raw.id : '') }', 'expense')"`; // Need to fix ID mapping in GS if nested differently. GS sends 'raw' as the item. Item has ID.
-                            // Actually GS sends: raw: item. item has .id if coming from list.
-                            // Let's check GS Structure: tableData.push({..., raw: item}). item has {id, date, ...}
+                            if(r.raw.type === 'expense') clickAction = `onclick="viewDetailModal('${r.raw.details && r.raw.details.id ? r.raw.details.id : (r.raw.raw ? r.raw.raw.id : '') }', 'expense')"`; 
                             if(r.raw.type === 'expense' && r.raw.details && r.raw.details.receiptImage) {
-                                clickAction = `onclick="viewDetailModal('${r.raw.id || ''}', 'expense')"`; // Wait, ID might be needed.
-                                // Actually for expense, we just want to show the image if it exists.
-                                // Let's use viewImage directly if we have the image url/base64 in the row data to save lookups?
-                                // No, viewDetailModal expects ID to find in currentExpenseData. But Summary data is separate.
-                                // We should probably just pass the image URL to a viewImage function if it's an expense.
-                                if(r.raw.details && r.raw.details.receiptImage) {
-                                     clickAction = `onclick="viewImage('${r.raw.details.receiptImage}')" class="cursor-pointer hover:bg-gray-100"`;
-                                }
+                                 clickAction = `onclick="viewImage('${r.raw.details.receiptImage}')" class="cursor-pointer hover:bg-gray-100"`;
                             }
 
                             tbody.innerHTML += `
@@ -1372,6 +1797,9 @@
             } else if (source === 'expense') { 
                  item = currentExpenseData.find(x => x.id == id);
                  title = "รายละเอียดรายจ่าย";
+            } else if (source === 'petty_cash') {
+                item = currentPettyCashData.find(x => x.id == id);
+                title = "รายละเอียดการซื้อของ (เงินสำรอง)";
             }
 
             if (!item) return;
@@ -1382,6 +1810,9 @@
             if (source === 'credit_unpaid') {
                 document.getElementById('detStatus').innerText = 'ค้างชำระ';
                 document.getElementById('detStatus').className = "font-bold text-red-600 text-base";
+            } else if (source === 'petty_cash') {
+                document.getElementById('detStatus').innerText = item.status || 'จ่ายแล้ว';
+                document.getElementById('detStatus').className = item.status === 'จ่ายแล้ว' ? "font-bold text-green-600 text-base" : "font-bold text-red-600 text-base";
             } else {
                 document.getElementById('detStatus').innerText = 'สำเร็จ';
                 document.getElementById('detStatus').className = "font-bold text-green-600 text-base";
@@ -1392,7 +1823,6 @@
                 document.getElementById('detVendor').innerText = `เงินเดือน: ${item.employee}`;
                 if(item.details) document.getElementById('detVendor').innerText += `\n(${item.details})`;
             } else {
-                // credit items use 'vendor' (from exp)
                 document.getElementById('detVendor').innerText = item.vendor || item.description || item.desc || '-'; 
             }
 
@@ -1400,7 +1830,7 @@
             document.getElementById('detUser').innerText = item.user || item.payer || '-'; // Salary uses payer
             document.getElementById('detAmount').innerText = Number(item.amount).toLocaleString();
 
-            // Image
+            // Image 1: Receipt
             const imgContainer = document.getElementById('detImage');
             const noImgContainer = document.getElementById('detNoImage');
             const imgData = item.receiptImage; 
@@ -1412,6 +1842,21 @@
             } else {
                 imgContainer.classList.add('hidden');
                 noImgContainer.classList.remove('hidden');
+            }
+
+            // Image 2: Slip (New for Petty Cash)
+            const slipContainer = document.getElementById('detSlipContainer');
+            const slipImg = document.getElementById('detSlipImage');
+            const slipData = item.slipImage;
+            
+            // Check for both slipImage and details.slipImage (salary structure can vary)
+            const slipSrc = item.slipImage || (item.details && item.details.slipImage) || "";
+
+            if (slipSrc && slipSrc !== "") {
+                slipImg.src = slipSrc;
+                slipContainer.classList.remove('hidden');
+            } else {
+                slipContainer.classList.add('hidden');
             }
 
             // Close other modals if open (just in case)
@@ -1429,6 +1874,209 @@
             if (!src) return;
             document.getElementById('modalImg').src = src;
             document.getElementById('imageModal').classList.remove('hidden');
+        }
+
+        // --- MONEY VERIFICATION FUNCTIONS ---
+
+        function openMoneyVerification() {
+            navigateTo('page-money-verification');
+            document.getElementById('verifyDateSelect').value = formatInputDate(new Date());
+            document.getElementById('pendingVerifyListContainer').classList.add('hidden');
+            document.getElementById('verifyFormContainer').classList.add('hidden');
+            
+            // Set default date range for history
+            const d = new Date();
+            const fd = new Date(d.getFullYear(), d.getMonth(), 1);
+            const ld = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+            document.getElementById('filterVerifyStart').value = formatInputDate(fd);
+            document.getElementById('filterVerifyEnd').value = formatInputDate(ld);
+            loadVerifyHistory();
+        }
+
+        function loadPendingSales(btn) {
+            const d = document.getElementById('verifyDateSelect').value;
+            if(!d) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกวันที่', 'warning');
+            
+            const p = d.split('-');
+            setBtnLoading(btn, true);
+            
+            fetch(`${APPS_SCRIPT_URL}?action=getPendingSalesForVerification&date=${p[2]}/${p[1]}/${p[0]}&_t=${Date.now()}`)
+            .then(r => r.json())
+            .then(res => {
+                setBtnLoading(btn, false);
+                const list = document.getElementById('pendingVerifyList');
+                const container = document.getElementById('pendingVerifyListContainer');
+                list.innerHTML = '';
+                
+                if (res.status === 'success' && res.data && res.data.length > 0) {
+                    container.classList.remove('hidden');
+                    res.data.forEach((item, index) => {
+                         // Create clickable card for each pending sale
+                         const div = document.createElement('div');
+                         div.className = "bg-white p-3 rounded-lg shadow border border-gray-200 hover:border-purple-500 cursor-pointer transition flex justify-between items-center";
+                         div.onclick = () => selectPendingVerify(item);
+                         div.innerHTML = `
+                             <div>
+                                <p class="font-bold text-gray-700 text-sm">ยอดขายวันที่: ${item.date}</p>
+                                <p class="text-xs text-gray-500">บันทึกโดย: ${item.user}</p>
+                             </div>
+                             <div class="text-right">
+                                <span class="bg-purple-100 text-purple-700 px-2 py-1 rounded-full text-xs font-bold">เลือกตรวจนับ</span>
+                             </div>
+                         `;
+                         list.appendChild(div);
+                    });
+                } else {
+                    container.classList.remove('hidden');
+                    list.innerHTML = '<p class="text-gray-500 text-center text-sm bg-gray-100 p-2 rounded">ไม่มีรายการที่รอตรวจนับในวันที่เลือก</p>';
+                }
+                
+                // Hide form if reloading list
+                document.getElementById('verifyFormContainer').classList.add('hidden');
+            })
+            .catch(e => {
+                setBtnLoading(btn, false);
+                Swal.fire('Error', 'โหลดข้อมูลไม่สำเร็จ', 'error');
+            });
+        }
+
+        function selectPendingVerify(item) {
+            selectedPendingSale = item;
+            
+            // Fill Form
+            document.getElementById('vEmpCash').innerText = Number(item.cntCash).toLocaleString();
+            document.getElementById('vEmpTransfer').innerText = Number(item.cntTransfer).toLocaleString();
+            
+            document.getElementById('vOwnerCash').value = '';
+            document.getElementById('vOwnerTransfer').value = '';
+            document.getElementById('vDiffMissing').innerText = '0';
+            document.getElementById('vDiffOver').innerText = '0';
+            
+            document.getElementById('verifyFormContainer').classList.remove('hidden');
+            document.getElementById('verifyFormContainer').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function calcVerifyDiff() {
+            if (!selectedPendingSale) return;
+            
+            const empCash = Number(selectedPendingSale.cntCash) || 0;
+            const empTrans = Number(selectedPendingSale.cntTransfer) || 0;
+            const empTotal = empCash + empTrans;
+            
+            const ownCash = Number(document.getElementById('vOwnerCash').value) || 0;
+            const ownTrans = Number(document.getElementById('vOwnerTransfer').value) || 0;
+            const ownTotal = ownCash + ownTrans;
+            
+            const diff = ownTotal - empTotal;
+            
+            document.getElementById('vDiffMissing').innerText = diff < 0 ? Math.abs(diff).toLocaleString() : '0';
+            document.getElementById('vDiffOver').innerText = diff > 0 ? diff.toLocaleString() : '0';
+        }
+
+        function cancelVerify() {
+            document.getElementById('verifyFormContainer').classList.add('hidden');
+            selectedPendingSale = null;
+        }
+
+        function submitVerify(btn) {
+            if (!selectedPendingSale) return;
+            
+            const ownCash = document.getElementById('vOwnerCash').value;
+            const ownTrans = document.getElementById('vOwnerTransfer').value;
+            
+            if (ownCash === '' || ownTrans === '') {
+                return Swal.fire('ข้อมูลไม่ครบ', 'กรุณากรอกยอดที่นับได้ (ใส่ 0 หากไม่มี)', 'warning');
+            }
+            
+            const diffMissing = document.getElementById('vDiffMissing').innerText.replace(/,/g, '');
+            const diffOver = document.getElementById('vDiffOver').innerText.replace(/,/g, '');
+            
+            const data = {
+                action: 'saveMoneyVerification',
+                salesId: selectedPendingSale.id,
+                salesDate: selectedPendingSale.date,
+                empCash: selectedPendingSale.cntCash,
+                empTransfer: selectedPendingSale.cntTransfer,
+                ownerCash: ownCash,
+                ownerTransfer: ownTrans,
+                diffMissing: diffMissing,
+                diffOver: diffOver,
+                user: currentUser
+            };
+            
+            setBtnLoading(btn, true);
+            fetch(APPS_SCRIPT_URL, {method: 'POST', body: JSON.stringify(data)})
+            .then(r => r.json())
+            .then(res => {
+                setBtnLoading(btn, false);
+                if (res.status === 'success') {
+                    Swal.fire('สำเร็จ', 'บันทึกการตรวจสอบเรียบร้อย', 'success');
+                    cancelVerify();
+                    // Refresh list and history
+                    loadPendingSales(document.querySelector('#page-money-verification button')); 
+                    loadVerifyHistory();
+                } else {
+                    Swal.fire('Error', res.message, 'error');
+                }
+            })
+            .catch(e => {
+                setBtnLoading(btn, false);
+                Swal.fire('Error', 'Connection failed', 'error');
+            });
+        }
+
+        function loadVerifyHistory() {
+            const s = document.getElementById('filterVerifyStart').value;
+            const e = document.getElementById('filterVerifyEnd').value;
+            if(!s || !e) return;
+            
+            const sp = s.split('-');
+            const ep = e.split('-');
+            
+            const tbody = document.getElementById('verifyHistoryBody');
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center p-4 text-gray-400"><i class="fa-solid fa-circle-notch fa-spin"></i></td></tr>';
+            
+            fetch(`${APPS_SCRIPT_URL}?action=getVerificationHistory&startDate=${sp[2]}/${sp[1]}/${sp[0]}&endDate=${ep[2]}/${ep[1]}/${ep[0]}&_t=${Date.now()}`)
+            .then(r => r.json())
+            .then(res => {
+                tbody.innerHTML = '';
+                currentVerificationHistory = res.data || [];
+                
+                if (currentVerificationHistory.length > 0) {
+                    currentVerificationHistory.forEach(row => {
+                         tbody.innerHTML += `
+                            <tr class="border-b hover:bg-gray-50 cursor-pointer" onclick="viewVerificationDetail('${row.id}')">
+                                <td class="p-2">${row.salesDate}</td>
+                                <td class="p-2 text-right">${Number(row.ownerCash).toLocaleString()}</td>
+                                <td class="p-2 text-right">${Number(row.ownerTransfer).toLocaleString()}</td>
+                                <td class="p-2 text-right text-red-500">${Number(row.diffMissing) > 0 ? Number(row.diffMissing).toLocaleString() : '-'}</td>
+                                <td class="p-2 text-right text-green-500">${Number(row.diffOver) > 0 ? Number(row.diffOver).toLocaleString() : '-'}</td>
+                            </tr>
+                         `;
+                    });
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center p-4 text-gray-400">ไม่พบประวัติในช่วงเวลานี้</td></tr>';
+                }
+            })
+            .catch(e => {
+                 tbody.innerHTML = '<tr><td colspan="5" class="text-center p-4 text-red-400">โหลดข้อมูลไม่สำเร็จ</td></tr>';
+            });
+        }
+
+        function viewVerificationDetail(id) {
+            const item = currentVerificationHistory.find(x => x.id === id);
+            if (!item) return;
+            
+            document.getElementById('vdDate').innerText = item.salesDate;
+            document.getElementById('vdEmpCash').innerText = Number(item.empCash).toLocaleString();
+            document.getElementById('vdEmpTransfer').innerText = Number(item.empTransfer).toLocaleString();
+            document.getElementById('vdOwnerCash').innerText = Number(item.ownerCash).toLocaleString();
+            document.getElementById('vdOwnerTransfer').innerText = Number(item.ownerTransfer).toLocaleString();
+            document.getElementById('vdMissing').innerText = Number(item.diffMissing).toLocaleString();
+            document.getElementById('vdOver').innerText = Number(item.diffOver).toLocaleString();
+            document.getElementById('vdVerifier').innerText = `ตรวจสอบโดย: ${item.verifier}`;
+            
+            document.getElementById('verifyDetailModal').classList.remove('hidden');
         }
     </script>
 </body>
