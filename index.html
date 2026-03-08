@@ -753,7 +753,7 @@
         // * อย่าลืมกด Deploy (การทำให้ใช้งานได้) -> New Deployment 
         // * แล้วนำลิงก์ใหม่มาอัปเดตในตัวแปร SCRIPT_URL ด้านล่างนี้ด้วยครับ 
         // **********************************************************
-        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyCzI5U3cSYl32loG6xS_MMz47IMCO9wEfJJgHx9bwE3pWDUj4X8fA_Q7rp-KZOWrzJjg/exec';
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzFw8zCaPBrlCzveWvIJqoTSnNvzYQ4GpumDIN1whKHqXZFgW7VTeYIqwSgV2IwAzcFmA/exec';
         let currentUser = null;
         let targetUser = ''; // ตัวแปรสำหรับ Admin สวมรอย
         let currentStockType = ''; // 'bread' or 'glass'
@@ -825,22 +825,61 @@
         }
         
         function formatToThaiDate(dateStr) {
-            if (!dateStr) return '-';
-            if (dateStr.includes('/')) {
-                const parts = dateStr.split(' ');
-                const [d, m, y] = parts[0].split('/');
-                let year = parseInt(y);
-                if (year < 2500) year += 543;
-                return `${d}/${m}/${year}` + (parts[1] ? ` ${parts[1]}` : '');
+            if (!dateStr || dateStr === '-') return '-';
+            const str = String(dateStr).trim();
+            if (str === '') return '-';
+
+            // จัดการข้อมูล Date ที่ถูกแปลงเป็น ISO String (เช่น 1899-12-30T... หรือ 2024-05-12T...)
+            if (str.includes('T') || str.includes('GMT') || /^[A-Za-z]{3}\s/.test(str)) {
+                const d = new Date(str);
+                if (!isNaN(d.getTime())) {
+                    let year = d.getFullYear();
+                    if (year === 1899) return '-'; // ถ้าเป็นปี 1899 แสดงว่าเป็นข้อมูลเวลา ไม่ใช่วันที่
+                    if (year < 2500) year += 543;
+                    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${year}`;
+                }
             }
-            if (dateStr.includes('-')) {
-                const parts = dateStr.split(' ');
-                const [y, m, d] = parts[0].split('-');
-                let year = parseInt(y);
-                if (year < 2500) year += 543;
-                return `${d}/${m}/${year}` + (parts[1] ? ` ${parts[1]}` : '');
+
+            if (str.includes('/')) {
+                const parts = str.split(' ')[0].split('/');
+                if (parts.length === 3) {
+                    let year = parseInt(parts[2]);
+                    if (year < 2500) year += 543;
+                    return `${String(parts[0]).padStart(2, '0')}/${String(parts[1]).padStart(2, '0')}/${year}`;
+                }
             }
-            return dateStr;
+            if (str.includes('-')) {
+                const parts = str.split(' ')[0].split('-');
+                if (parts.length === 3) {
+                    let year = parseInt(parts[0]);
+                    if (year < 2500) year += 543;
+                    return `${String(parts[2]).padStart(2, '0')}/${String(parts[1]).padStart(2, '0')}/${year}`;
+                }
+            }
+            return str;
+        }
+
+        // ฟังก์ชันใหม่ สำหรับสกัดและจัดฟอร์แมต "เวลา" โดยเฉพาะ
+        function formatTimeStr(val) {
+            if (!val || val === '-') return '-';
+            const str = String(val).trim();
+            if (str === '') return '-';
+
+            // ดึงเฉพาะเวลาจาก ISO String (เช่น 1899-12-30T05:58:56.000Z)
+            if (str.includes('1899') || str.includes('T') || str.includes('GMT') || /^[A-Za-z]{3}\s/.test(str)) {
+                const d = new Date(str);
+                if (!isNaN(d.getTime())) {
+                    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+                }
+            }
+            // ถ้ามาในรูปแบบ HH:mm อยู่แล้ว
+            if (str.includes(':')) {
+                const parts = str.split(':');
+                if(parts.length >= 2) {
+                    return parts[0].padStart(2, '0') + ':' + parts[1].padStart(2, '0');
+                }
+            }
+            return str;
         }
 
         function showLoading(text = 'กำลังประมวลผล...') {
@@ -1415,10 +1454,10 @@
                                         <div class="font-bold text-gray-800 mb-1"><i class="far fa-calendar-alt mr-1 text-brand-500"></i> ${formatToThaiDate(row.date)}</div>
                                         <div class="flex space-x-2 text-xs">
                                             <span class="bg-green-50 text-green-700 px-2 py-1 rounded-md border border-green-100 flex-1 text-center">
-                                                <i class="fas fa-sign-in-alt mr-1"></i> เข้า: <b>${row.timeIn || '-'}</b>
+                                                <i class="fas fa-sign-in-alt mr-1"></i> เข้า: <b>${formatTimeStr(row.timeIn)}</b>
                                             </span>
                                             <span class="bg-red-50 text-red-700 px-2 py-1 rounded-md border border-red-100 flex-1 text-center">
-                                                <i class="fas fa-sign-out-alt mr-1"></i> ออก: <b>${row.timeOut || '-'}</b>
+                                                <i class="fas fa-sign-out-alt mr-1"></i> ออก: <b>${formatTimeStr(row.timeOut)}</b>
                                             </span>
                                         </div>
                                     </div>
